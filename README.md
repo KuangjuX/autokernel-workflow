@@ -6,7 +6,9 @@ Scope intentionally kept small:
 
 1. `prepare` - copy one mimikyu kernel task into AKO4ALL input layout
 2. `sync-git` - parse AKO4ALL branch commit history into local history file
-3. `export` - export static snapshot/dashboard for local viewing
+3. `archive-git` - archive git bundles into history DB for offline restore
+4. `restore-git` - restore archived git bundles from history DB
+5. `export` - export static snapshot/dashboard for local viewing
 
 AKO4ALL engine is pinned as submodule:
 
@@ -73,3 +75,40 @@ Generate static snapshot and dashboard HTML.
 ```
 
 Open `workspace/history_dashboard.html` directly in browser.
+In the run details table, click the `View` button in the `patch` column to
+expand the generated commit patch.
+
+## Command: archive-git
+
+Archive one branch as a git bundle into `history.db` (JSON file). This allows
+recovery even when `workspace/runs/*` is deleted.
+
+```bash
+./bin/kernelhub archive-git \
+  --repo-path ./workspace/runs/run-gemm-001/ako \
+  --branch agent/run-gemm-001 \
+  --db-path ./workspace/history.db \
+  --run-id run-gemm-001
+```
+
+Optional:
+
+- `--note`
+- `--dry-run`
+
+## Command: restore-git
+
+Restore archived git objects into a local repo from `history.db`.
+
+```bash
+./bin/kernelhub restore-git \
+  --db-path ./workspace/history.db \
+  --run-id run-gemm-001 \
+  --out-repo ./workspace/restored_repo
+```
+
+Optional:
+
+- `--archive-id` (pick a specific archive record)
+- `--checkout` (commit/branch/tag to checkout after fetch)
+- `--dry-run`
