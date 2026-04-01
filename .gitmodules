@@ -1,0 +1,3 @@
+[submodule "third_party/AKO4ALL"]
+	path = third_party/AKO4ALL
+	url = https://github.com/KuangjuX/AKO4ALL.git
