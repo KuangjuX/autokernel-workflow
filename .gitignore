@@ -1,0 +1,4 @@
+workspace/
+bin/
+*.test
+*.txt
