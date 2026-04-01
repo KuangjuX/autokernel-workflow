@@ -8,8 +8,6 @@ import (
 	"kernelhub/internal/commands"
 )
 
-var errHelp = errors.New("help requested")
-
 func Run(args []string) error {
 	if len(args) == 0 {
 		printRootUsage()
@@ -24,6 +22,10 @@ func Run(args []string) error {
 		return runPrepare(args[1:])
 	case "sync-git":
 		return runSyncGit(args[1:])
+	case "archive-git":
+		return runArchiveGit(args[1:])
+	case "restore-git":
+		return runRestoreGit(args[1:])
 	case "export":
 		return runExport(args[1:])
 	default:
@@ -41,6 +43,8 @@ Usage:
 Commands:
   prepare    Prepare AKO4ALL task input from mimikyu kernel source
   sync-git   Parse AKO4ALL branch commits into KernelHub history (skeleton)
+  archive-git Archive git objects into history DB for offline restore
+  restore-git Restore archived git objects from history DB
   export     Export static snapshot/dashboard from history data (skeleton)
 
 Use "kernelhub <command> --help" for command-specific flags.`)
@@ -113,5 +117,53 @@ func runExport(args []string) error {
 		HTMLOut: *htmlOut,
 		Format:  *format,
 		DryRun:  *dryRun,
+	})
+}
+
+func runArchiveGit(args []string) error {
+	fs := flag.NewFlagSet("archive-git", flag.ContinueOnError)
+	repoPath := fs.String("repo-path", "third_party/AKO4ALL", "Git repo path to archive")
+	branch := fs.String("branch", "", "Branch to archive, e.g. agent/run-gemm-001")
+	dbPath := fs.String("db-path", "./workspace/history.db", "History DB path")
+	runID := fs.String("run-id", "", "Optional run id for archive indexing")
+	note := fs.String("note", "", "Optional note for this archive")
+	dryRun := fs.Bool("dry-run", false, "Print actions only")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	return commands.ArchiveGit(commands.ArchiveGitOptions{
+		RepoPath: *repoPath,
+		Branch:   *branch,
+		DBPath:   *dbPath,
+		RunID:    *runID,
+		Note:     *note,
+		DryRun:   *dryRun,
+	})
+}
+
+func runRestoreGit(args []string) error {
+	fs := flag.NewFlagSet("restore-git", flag.ContinueOnError)
+	dbPath := fs.String("db-path", "./workspace/history.db", "History DB path")
+	runID := fs.String("run-id", "", "Select latest archive by run id")
+	archiveID := fs.String("archive-id", "", "Select archive by exact archive id")
+	outRepo := fs.String("out-repo", "./workspace/restored_repo", "Output repo path")
+	checkout := fs.String("checkout", "", "Commit/branch/tag to checkout after fetch")
+	dryRun := fs.Bool("dry-run", false, "Print actions only")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	return commands.RestoreGit(commands.RestoreGitOptions{
+		DBPath:      *dbPath,
+		RunID:       *runID,
+		ArchiveID:   *archiveID,
+		OutRepoPath: *outRepo,
+		Checkout:    *checkout,
+		DryRun:      *dryRun,
 	})
 }

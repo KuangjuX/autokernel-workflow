@@ -24,6 +24,7 @@ type SyncGitOptions struct {
 type HistoryFile struct {
 	GeneratedAt string      `json:"generated_at"`
 	Runs        []RunRecord `json:"runs"`
+	Archives    []GitArchiveRecord `json:"archives,omitempty"`
 }
 
 type RunRecord struct {
