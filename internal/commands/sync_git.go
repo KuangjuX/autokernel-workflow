@@ -48,6 +48,8 @@ type IterationRecord struct {
 	Correctness       string  `json:"correctness,omitempty"`
 	SpeedupVsBaseline float64 `json:"speedup_vs_baseline,omitempty"`
 	LatencyUs         float64 `json:"latency_us,omitempty"`
+	Patch             string  `json:"patch,omitempty"`
+	PatchError        string  `json:"patch_error,omitempty"`
 }
 
 func SyncGit(opts SyncGitOptions) error {
