@@ -125,6 +125,10 @@ func openHistoryDB(path string) (*sql.DB, error) {
 		_ = db.Close()
 		return nil, err
 	}
+	if err := ensureHistorySchemaCompat(db); err != nil {
+		_ = db.Close()
+		return nil, err
+	}
 	return db, nil
 }
 
@@ -151,6 +155,8 @@ func initHistorySchema(db *sql.DB) error {
 			commit_time TEXT NOT NULL,
 			subject TEXT NOT NULL,
 			hypothesis TEXT NOT NULL,
+			changes TEXT NOT NULL DEFAULT '',
+			analysis TEXT NOT NULL DEFAULT '',
 			kernel TEXT NOT NULL DEFAULT '',
 			agent TEXT NOT NULL DEFAULT '',
 			correctness TEXT NOT NULL DEFAULT '',
@@ -182,6 +188,61 @@ func initHistorySchema(db *sql.DB) error {
 		}
 	}
 	return nil
+}
+
+func ensureHistorySchemaCompat(db *sql.DB) error {
+	iterationMigrations := []struct {
+		column  string
+		ddlType string
+	}{
+		{column: "changes", ddlType: "TEXT NOT NULL DEFAULT ''"},
+		{column: "analysis", ddlType: "TEXT NOT NULL DEFAULT ''"},
+	}
+	for _, migration := range iterationMigrations {
+		has, err := tableHasColumn(db, "iterations", migration.column)
+		if err != nil {
+			return err
+		}
+		if has {
+			continue
+		}
+		stmt := fmt.Sprintf(
+			`ALTER TABLE iterations ADD COLUMN %s %s`,
+			migration.column,
+			migration.ddlType,
+		)
+		if _, err := db.Exec(stmt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func tableHasColumn(db *sql.DB, tableName, columnName string) (bool, error) {
+	rows, err := db.Query(fmt.Sprintf(`PRAGMA table_info(%s)`, tableName))
+	if err != nil {
+		return false, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var cid int
+		var name string
+		var colType string
+		var notNull int
+		var defaultValue sql.NullString
+		var pk int
+		if err := rows.Scan(&cid, &name, &colType, &notNull, &defaultValue, &pk); err != nil {
+			return false, err
+		}
+		if strings.EqualFold(name, columnName) {
+			return true, nil
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return false, err
+	}
+	return false, nil
 }
 
 func prepareHistoryDBFile(path string) error {
@@ -372,9 +433,9 @@ func insertRunTx(tx *sql.Tx, run RunRecord) error {
 		if _, err := tx.Exec(
 			`INSERT INTO iterations (
 				run_row_id, iteration, commit_hash, parent_commit_hash, commit_time,
-				subject, hypothesis, kernel, agent, correctness, speedup_vs_baseline,
-				latency_us, patch, patch_error
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				subject, hypothesis, changes, analysis, kernel, agent, correctness,
+				speedup_vs_baseline, latency_us, patch, patch_error
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			runRowID,
 			it.Iteration,
 			it.CommitHash,
@@ -382,6 +443,8 @@ func insertRunTx(tx *sql.Tx, run RunRecord) error {
 			it.CommitTime,
 			it.Subject,
 			it.Hypothesis,
+			it.Changes,
+			it.Analysis,
 			it.Kernel,
 			it.Agent,
 			it.Correctness,
@@ -489,7 +552,8 @@ func queryIterationsForRun(db *sql.DB, runRowID int64) ([]IterationRecord, error
 	rows, err := db.Query(
 		`SELECT
 			iteration, commit_hash, parent_commit_hash, commit_time, subject, hypothesis,
-			kernel, agent, correctness, speedup_vs_baseline, latency_us, patch, patch_error
+			changes, analysis, kernel, agent, correctness, speedup_vs_baseline,
+			latency_us, patch, patch_error
 		 FROM iterations
 		 WHERE run_row_id = ?
 		 ORDER BY id`,
@@ -512,6 +576,8 @@ func queryIterationsForRun(db *sql.DB, runRowID int64) ([]IterationRecord, error
 			&it.CommitTime,
 			&it.Subject,
 			&it.Hypothesis,
+			&it.Changes,
+			&it.Analysis,
 			&it.Kernel,
 			&it.Agent,
 			&it.Correctness,
