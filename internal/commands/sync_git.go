@@ -112,8 +112,21 @@ func SyncGit(opts SyncGitOptions) error {
 }
 
 func collectGitRecords(repoPath, branch string) ([]IterationRecord, error) {
+	// Try to find the fork point from main/master to only sync branch-specific commits.
+	revRange := branch
+	for _, base := range []string{"main", "master"} {
+		probe := exec.Command("git", "-C", repoPath, "merge-base", base, branch)
+		if mbOut, mbErr := probe.Output(); mbErr == nil {
+			mergeBase := strings.TrimSpace(string(mbOut))
+			if mergeBase != "" {
+				revRange = mergeBase + ".." + branch
+				break
+			}
+		}
+	}
+
 	cmd := exec.Command(
-		"git", "-C", repoPath, "log", branch,
+		"git", "-C", repoPath, "log", revRange,
 		"--reverse",
 		"--pretty=format:%H%x1f%P%x1f%ct%x1f%s%x1f%b%x1e",
 	)
