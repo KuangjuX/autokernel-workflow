@@ -88,6 +88,9 @@ func (s *Server) registerRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc(apiV1Prefix+"/snapshot", s.handleSnapshot)
 	mux.HandleFunc(apiV1Prefix+"/patch", s.handlePatch)
+	mux.HandleFunc(apiV1Prefix+"/runs", s.handleRunsIngest)
+	mux.HandleFunc(apiV1Prefix+"/iterations", s.handleIterationsIngest)
+	mux.HandleFunc(apiV1Prefix+"/archives", s.handleArchivesIngest)
 }
 
 // ---------------------------------------------------------------------------
