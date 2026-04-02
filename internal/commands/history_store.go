@@ -87,6 +87,11 @@ func loadHistory(path string) (HistoryFile, error) {
 	return history, nil
 }
 
+// OpenHistoryDB is an exported wrapper for server package reuse.
+func OpenHistoryDB(path string) (*sql.DB, error) {
+	return openHistoryDB(path)
+}
+
 func openHistoryDB(path string) (*sql.DB, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, errors.New("history path cannot be empty")
