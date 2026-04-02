@@ -5,10 +5,11 @@ Go minimal skeleton for AKO4ALL-based kernel optimization orchestration.
 Scope intentionally kept small:
 
 1. `prepare` - copy one mimikyu kernel task into AKO4ALL input layout
-2. `sync-git` - parse AKO4ALL branch commit history into local history file
+2. `sync-git` - parse AKO4ALL branch commit history into local history DB
 3. `archive-git` - archive git bundles into history DB for offline restore
 4. `restore-git` - restore archived git bundles from history DB
-5. `export` - export static snapshot/dashboard for local viewing
+5. `serve` - start a local HTTP dashboard backed by SQLite
+6. `export` - export static snapshot/dashboard for offline viewing
 
 AKO4ALL engine is pinned as submodule:
 
@@ -42,7 +43,7 @@ Optional:
 
 ## Command: sync-git
 
-Parse one AKO4ALL branch and append run history into local data file.
+Parse one AKO4ALL branch and append run history into local SQLite DB.
 
 ```bash
 ./bin/kernelhub sync-git \
@@ -54,7 +55,9 @@ Parse one AKO4ALL branch and append run history into local data file.
 
 Notes:
 
-- In this minimal skeleton, `--db-path` stores JSON history data.
+- `--db-path` is a SQLite history database path.
+- If an old JSON history file is found at `--db-path`, KernelHub auto-migrates
+  it to SQLite and keeps a backup at `<db-path>.json.bak`.
 - Structured fields are parsed from commit body when present:
   - `kernel:`
   - `agent:`
@@ -64,7 +67,7 @@ Notes:
 
 ## Command: export
 
-Generate static snapshot and dashboard HTML.
+Generate static snapshot and dashboard HTML (optional for offline sharing).
 
 ```bash
 ./bin/kernelhub export \
@@ -78,9 +81,27 @@ Open `workspace/history_dashboard.html` directly in browser.
 In the run details table, click the `View` button in the `patch` column to
 expand the generated commit patch.
 
+## Command: serve
+
+Start a local HTTP server and live dashboard backed by SQLite.
+
+```bash
+./bin/kernelhub serve \
+  --db-path ./workspace/history.db \
+  --listen :8080
+```
+
+Open [http://127.0.0.1:8080](http://127.0.0.1:8080) in browser.
+
+Endpoints:
+
+- `GET /api/snapshot` (`?include_patches=1` to embed commit patches)
+- `GET /api/patch?repo_path=...&commit=...&parent=...`
+- `GET /healthz`
+
 ## Command: archive-git
 
-Archive one branch as a git bundle into `history.db` (JSON file). This allows
+Archive one branch as a git bundle into `history.db` (SQLite). This allows
 recovery even when `workspace/runs/*` is deleted.
 
 ```bash
