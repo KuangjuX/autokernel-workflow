@@ -30,25 +30,13 @@ func Export(opts ExportOptions) error {
 	if opts.DBPath == "" || opts.OutPath == "" {
 		return fmt.Errorf("--db-path and --out are required")
 	}
-	history, err := loadHistory(opts.DBPath)
+	snapshot, err := buildSnapshot(opts.DBPath, true)
 	if err != nil {
 		return err
 	}
 
-	runsWithPatches := enrichRunsWithPatches(history.Runs)
-	stats := buildStats(runsWithPatches)
-	snapshot := Snapshot{
-		Meta: map[string]any{
-			"format_version": "v1",
-			"generated_at":   time.Now().UTC().Format(time.RFC3339),
-			"source":         opts.DBPath,
-		},
-		Stats: stats,
-		Runs:  runsWithPatches,
-	}
-
 	if opts.DryRun {
-		fmt.Printf("[kernelhub export] dry-run runs=%d format=%s out=%s\n", len(history.Runs), opts.Format, opts.OutPath)
+		fmt.Printf("[kernelhub export] dry-run runs=%d format=%s out=%s\n", len(snapshot.Runs), opts.Format, opts.OutPath)
 		return nil
 	}
 
@@ -89,6 +77,28 @@ func Export(opts ExportOptions) error {
 	return nil
 }
 
+func buildSnapshot(dbPath string, includePatches bool) (Snapshot, error) {
+	history, err := loadHistory(dbPath)
+	if err != nil {
+		return Snapshot{}, err
+	}
+
+	runs := history.Runs
+	if includePatches {
+		runs = enrichRunsWithPatches(runs)
+	}
+
+	return Snapshot{
+		Meta: map[string]any{
+			"format_version": "v1",
+			"generated_at":   time.Now().UTC().Format(time.RFC3339),
+			"source":         dbPath,
+		},
+		Stats: buildStats(runs),
+		Runs:  runs,
+	}, nil
+}
+
 func buildStats(runs []RunRecord) map[string]any {
 	best := 0.0
 	iterations := 0
@@ -109,11 +119,11 @@ func buildStats(runs []RunRecord) map[string]any {
 		}
 	}
 	return map[string]any{
-		"run_count":        len(runs),
-		"iteration_count":  iterations,
-		"unique_kernels":   len(kernels),
-		"unique_agents":    len(agents),
-		"best_speedup":     best,
+		"run_count":         len(runs),
+		"iteration_count":   iterations,
+		"unique_kernels":    len(kernels),
+		"unique_agents":     len(agents),
+		"best_speedup":      best,
 		"history_generated": time.Now().UTC().Format(time.RFC3339),
 	}
 }
