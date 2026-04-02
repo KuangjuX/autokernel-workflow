@@ -42,6 +42,8 @@ type IterationRecord struct {
 	CommitTime        string  `json:"commit_time"`
 	Subject           string  `json:"subject"`
 	Hypothesis        string  `json:"hypothesis"`
+	Changes           string  `json:"changes,omitempty"`
+	Analysis          string  `json:"analysis,omitempty"`
 	Kernel            string  `json:"kernel,omitempty"`
 	Agent             string  `json:"agent,omitempty"`
 	Correctness       string  `json:"correctness,omitempty"`
@@ -138,6 +140,7 @@ func collectGitRecords(repoPath, branch string) ([]IterationRecord, error) {
 		tsUnix, _ := strconv.ParseInt(parts[2], 10, 64)
 		subject := strings.TrimSpace(parts[3])
 		body := strings.TrimSpace(parts[4])
+		fields := parseCommitBodyFields(body)
 
 		iteration := parseIteration(subject, idx)
 		record := IterationRecord{
@@ -147,15 +150,25 @@ func collectGitRecords(repoPath, branch string) ([]IterationRecord, error) {
 			CommitTime:       time.Unix(tsUnix, 0).UTC().Format(time.RFC3339),
 			Subject:          subject,
 			Hypothesis:       parseHypothesis(subject),
-			Kernel:           extractField(`(?m)^kernel:\s*(.+)$`, body),
-			Agent:            extractField(`(?m)^agent:\s*(.+)$`, body),
-			Correctness:      extractField(`(?m)^correctness:\s*(.+)$`, body),
+			Changes:          firstNonEmpty(fields["changes"], fields["change"]),
+			Analysis:         fields["analysis"],
+			Kernel:           firstNonEmpty(fields["kernel"], extractField(`(?m)^kernel:\s*(.+)$`, body)),
+			Agent:            firstNonEmpty(fields["agent"], extractField(`(?m)^agent:\s*(.+)$`, body)),
+			Correctness:      firstNonEmpty(fields["correctness"], extractField(`(?m)^correctness:\s*(.+)$`, body)),
 		}
-		if v, ok := parseFloat(extractField(`(?m)^speedup_vs_baseline:\s*(.+)$`, body)); ok {
+		if v, ok := parseFloat(firstNonEmpty(
+			fields["speedup_vs_baseline"],
+			fields["speedup"],
+			extractField(`(?m)^speedup_vs_baseline:\s*(.+)$`, body),
+		)); ok {
 			record.SpeedupVsBaseline = v
 			record.HasSpeedup = true
 		}
-		if v, ok := parseFloat(extractField(`(?m)^latency_us:\s*(.+)$`, body)); ok {
+		if v, ok := parseFloat(firstNonEmpty(
+			fields["latency_us"],
+			fields["latency"],
+			extractField(`(?m)^latency_us:\s*(.+)$`, body),
+		)); ok {
 			record.LatencyUs = v
 			record.HasLatency = true
 		}
@@ -182,6 +195,88 @@ func parseHypothesis(subject string) string {
 		return strings.TrimSpace(subject[i+1:])
 	}
 	return strings.TrimSpace(subject)
+}
+
+func parseCommitBodyFields(body string) map[string]string {
+	fields := map[string][]string{}
+	currentKey := ""
+	for _, line := range strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n") {
+		key, value, ok := parseCommitFieldLine(line)
+		if ok {
+			currentKey = key
+			fields[currentKey] = []string{value}
+			continue
+		}
+		if currentKey == "" {
+			continue
+		}
+		// Preserve multiline field text for keys like "changes" and "analysis".
+		fields[currentKey] = append(fields[currentKey], strings.TrimRight(line, " \t"))
+	}
+
+	out := map[string]string{}
+	for key, chunks := range fields {
+		out[key] = strings.TrimSpace(strings.Join(chunks, "\n"))
+	}
+	return out
+}
+
+func parseCommitFieldLine(line string) (string, string, bool) {
+	trimmed := strings.TrimSpace(line)
+	if trimmed == "" {
+		return "", "", false
+	}
+	first := trimmed[0]
+	if !((first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z')) {
+		return "", "", false
+	}
+	keyRaw, value, ok := strings.Cut(trimmed, ":")
+	if !ok {
+		return "", "", false
+	}
+	key := normalizeCommitFieldKey(keyRaw)
+	if key == "" {
+		return "", "", false
+	}
+	return key, strings.TrimSpace(value), true
+}
+
+func normalizeCommitFieldKey(raw string) string {
+	if raw == "" {
+		return ""
+	}
+	var b strings.Builder
+	lastUnderscore := false
+	for _, r := range strings.TrimSpace(raw) {
+		switch {
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r + ('a' - 'A'))
+			lastUnderscore = false
+		case (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9'):
+			b.WriteRune(r)
+			lastUnderscore = false
+		case r == '_' || r == '-' || r == ' ':
+			if b.Len() > 0 && !lastUnderscore {
+				b.WriteByte('_')
+				lastUnderscore = true
+			}
+		default:
+			if b.Len() > 0 && !lastUnderscore {
+				b.WriteByte('_')
+				lastUnderscore = true
+			}
+		}
+	}
+	return strings.Trim(b.String(), "_")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func extractField(pattern, text string) string {
