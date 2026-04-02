@@ -150,6 +150,8 @@ For reliable parsing, include these commit body keys (exact key names):
 - `correctness: ...`
 - `speedup_vs_baseline: ...`
 - `latency_us: ...`
+- `changes: ...` (optional, supports multiline)
+- `analysis: ...` (optional, supports multiline)
 
 Additional keys are allowed for human review, but are not required by parser.
 

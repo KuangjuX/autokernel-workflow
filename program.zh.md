@@ -99,6 +99,8 @@ cd "workspace/runs/${RUN_ID}/ako"
 - `speedup_vs_baseline: ...`
 - `speedup_vs_best: ...`
 - `latency_us: ...`
+- `changes: ...`（可选，支持多行）
+- `analysis: ...`（可选，支持多行）
 - `gpu: ...`
 
 commit 标题建议：
