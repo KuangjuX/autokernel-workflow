@@ -133,3 +133,36 @@ Optional:
 - `--archive-id` (pick a specific archive record)
 - `--checkout` (commit/branch/tag to checkout after fetch)
 - `--dry-run`
+
+## FT sync scripts
+
+For a remote-run/local-view workflow, use the helper scripts in `scripts/`.
+
+Remote server (generate a consistent SQLite snapshot, then push with `ft sync --put`):
+
+```bash
+./scripts/ft_remote_snapshot_put.sh
+```
+
+Local machine (verify snapshot, backup old DB, then activate new DB):
+
+```bash
+./scripts/ft_local_activate_snapshot.sh
+```
+
+Recommended flow:
+
+1. Remote runs optimization (`sync-git` + `archive-git`) as usual.
+2. Remote runs `./scripts/ft_remote_snapshot_put.sh`.
+3. Local receives files via `ft sync`.
+4. Local runs `./scripts/ft_local_activate_snapshot.sh`.
+5. Local runs `./bin/kernelhub serve --db-path ./workspace/history.db --listen :8080`.
+
+Useful env vars:
+
+- `DB_PATH` (remote source DB, default `workspace/history.db`)
+- `SNAPSHOT_PATH` (snapshot file path, default `workspace/history.snapshot.db`)
+- `NO_PUT=1` (remote: build snapshot only, skip `ft sync --put`)
+- `EXPORT_STATIC=1` (remote: also regenerate static export files)
+- `KEEP_SNAPSHOT=1` (local: keep snapshot file after activation)
+- `RENDER_EXPORT=0` (local: skip static export regeneration)
