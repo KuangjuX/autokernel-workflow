@@ -73,6 +73,12 @@ cd "workspace/runs/${RUN_ID}/ako"
   --run-id "${RUN_ID}"
 ```
 
+说明：
+
+- `--db-path` 现在是 SQLite 历史数据库路径。
+- 若该路径存在旧版 JSON 历史文件，会自动迁移并保留备份
+  `<db-path>.json.bak`。
+
 ### F) 导出静态结果
 
 ```bash
