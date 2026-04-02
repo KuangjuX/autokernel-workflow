@@ -99,11 +99,17 @@ func buildSnapshot(dbPath string, includePatches bool) (Snapshot, error) {
 	}, nil
 }
 
+// BuildSnapshot is an exported wrapper for server package reuse.
+func BuildSnapshot(dbPath string, includePatches bool) (Snapshot, error) {
+	return buildSnapshot(dbPath, includePatches)
+}
+
 func buildStats(runs []RunRecord) map[string]any {
 	best := 0.0
 	iterations := 0
 	kernels := map[string]struct{}{}
 	agents := map[string]struct{}{}
+	gpus := map[string]struct{}{}
 	for _, run := range runs {
 		for _, it := range run.Iterations {
 			iterations++
@@ -222,6 +228,11 @@ func buildCommitPatch(repoPath, commitHash, parentCommitHash string) (string, st
 		return clampPatch(patch), ""
 	}
 	return "", fmt.Sprintf("cannot generate patch for commit %s", shortHash(commitHash, 12))
+}
+
+// BuildCommitPatch is an exported wrapper for server package reuse.
+func BuildCommitPatch(repoPath, commitHash, parentCommitHash string) (string, string) {
+	return buildCommitPatch(repoPath, commitHash, parentCommitHash)
 }
 
 func runGitText(repoPath string, args ...string) (string, error) {
