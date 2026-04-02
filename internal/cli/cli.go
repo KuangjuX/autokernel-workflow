@@ -28,6 +28,8 @@ func Run(args []string) error {
 		return runRestoreGit(args[1:])
 	case "export":
 		return runExport(args[1:])
+	case "serve":
+		return runServe(args[1:])
 	default:
 		printRootUsage()
 		return fmt.Errorf("unknown command: %s", args[0])
@@ -46,6 +48,7 @@ Commands:
   archive-git Archive git objects into history DB for offline restore
   restore-git Restore archived git objects from history DB
   export     Export static snapshot/dashboard from history data (skeleton)
+  serve      Start local HTTP dashboard powered by history DB
 
 Use "kernelhub <command> --help" for command-specific flags.`)
 }
@@ -165,5 +168,21 @@ func runRestoreGit(args []string) error {
 		OutRepoPath: *outRepo,
 		Checkout:    *checkout,
 		DryRun:      *dryRun,
+	})
+}
+
+func runServe(args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
+	dbPath := fs.String("db-path", "./workspace/history.db", "History DB path")
+	listen := fs.String("listen", ":8080", "Listen address, e.g. :8080 or 127.0.0.1:8080")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	return commands.Serve(commands.ServeOptions{
+		DBPath:     *dbPath,
+		ListenAddr: *listen,
 	})
 }
