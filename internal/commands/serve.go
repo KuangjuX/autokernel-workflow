@@ -466,6 +466,9 @@ func renderServeHTML() string {
       const parts = [];
       const correctness = safeText(it.correctness || "-", "-");
       parts.push("correctness: " + correctness);
+      if (safeText(it.gpu || "", "") !== "") {
+        parts.push("gpu: " + safeText(it.gpu, "-"));
+      }
       if (typeof it.speedup_vs_baseline === "number" && !Number.isNaN(it.speedup_vs_baseline)) {
         parts.push("speedup_vs_baseline: " + formatMetric(it.speedup_vs_baseline, "x"));
       }
@@ -504,6 +507,7 @@ func renderServeHTML() string {
         { label: "Iterations", value: String(stats.iteration_count || 0) },
         { label: "Best Speedup", value: formatMetric(stats.best_speedup || 0, "x") },
         { label: "Unique Kernels", value: String(stats.unique_kernels || 0) },
+        { label: "Unique GPUs", value: String(stats.unique_gpus || 0) },
       ];
       const html = items.map((it) =>
         "<div class='stat-card'><div class='stat-label'>" + it.label +
@@ -567,12 +571,12 @@ func renderServeHTML() string {
       wrap.className = "inner-wrap";
 
       const table = document.createElement("table");
-      table.innerHTML = "<thead><tr><th>iter</th><th>commit</th><th>time</th><th>subject</th><th>correctness</th><th>speedup</th><th>latency</th><th>inspect</th></tr></thead>";
+      table.innerHTML = "<thead><tr><th>iter</th><th>commit</th><th>time</th><th>subject</th><th>gpu</th><th>correctness</th><th>speedup</th><th>latency</th><th>inspect</th></tr></thead>";
       const body = document.createElement("tbody");
       const iterations = run.iterations || [];
       if (!iterations.length) {
         const tr = document.createElement("tr");
-        tr.innerHTML = "<td class='muted' colspan='8'>No commit details found.</td>";
+        tr.innerHTML = "<td class='muted' colspan='9'>No commit details found.</td>";
         body.appendChild(tr);
       } else {
         iterations.forEach((it) => {
@@ -582,6 +586,7 @@ func renderServeHTML() string {
             "<td><code>" + shortHash(it.commit_hash || "") + "</code></td>" +
             "<td>" + escapeHtml(safeText(it.commit_time, "-")) + "</td>" +
             "<td>" + escapeHtml(safeText(it.subject, "-")) + "</td>" +
+            "<td>" + escapeHtml(safeText(it.gpu, "-")) + "</td>" +
             "<td>" + correctnessBadge(it.correctness) + "</td>" +
             "<td>" + formatMetric(it.speedup_vs_baseline, "x") + "</td>" +
             "<td>" + formatMetric(it.latency_us, " us") + "</td>" +
@@ -609,6 +614,7 @@ func renderServeHTML() string {
       document.getElementById("modalMeta").textContent =
         "run: " + safeText(run.run_id, "-") +
         " | branch: " + safeText(run.branch, "-") +
+        " | gpu: " + safeText(it.gpu, "-") +
         " | time: " + safeText(it.commit_time, "-");
       document.getElementById("modalHypothesis").textContent = safeText(it.hypothesis, "-");
 

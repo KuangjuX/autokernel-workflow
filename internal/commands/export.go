@@ -116,6 +116,9 @@ func buildStats(runs []RunRecord) map[string]any {
 			if it.Agent != "" {
 				agents[it.Agent] = struct{}{}
 			}
+			if it.GPU != "" {
+				gpus[it.GPU] = struct{}{}
+			}
 		}
 	}
 	return map[string]any{
@@ -123,6 +126,7 @@ func buildStats(runs []RunRecord) map[string]any {
 		"iteration_count":   iterations,
 		"unique_kernels":    len(kernels),
 		"unique_agents":     len(agents),
+		"unique_gpus":       len(gpus),
 		"best_speedup":      best,
 		"history_generated": time.Now().UTC().Format(time.RFC3339),
 	}
@@ -141,6 +145,7 @@ run_count = %v
 iteration_count = %v
 unique_kernels = %v
 unique_agents = %v
+unique_gpus = %v
 best_speedup = %v
 runs_json = '''%s'''
 `,
@@ -150,6 +155,7 @@ runs_json = '''%s'''
 		snapshot.Stats["iteration_count"],
 		snapshot.Stats["unique_kernels"],
 		snapshot.Stats["unique_agents"],
+		snapshot.Stats["unique_gpus"],
 		snapshot.Stats["best_speedup"],
 		string(runsJSON),
 	), nil
@@ -742,6 +748,9 @@ func renderStaticHTML(snapshot Snapshot) string {
       const parts = [];
       const correctness = safeText(it.correctness || "-", "-");
       parts.push("correctness: " + correctness);
+      if (safeText(it.gpu || "", "") !== "") {
+        parts.push("gpu: " + safeText(it.gpu, "-"));
+      }
       if (typeof it.speedup_vs_baseline === "number" && !Number.isNaN(it.speedup_vs_baseline)) {
         parts.push("speedup_vs_baseline: " + formatMetric(it.speedup_vs_baseline, "x"));
       }
@@ -757,6 +766,7 @@ func renderStaticHTML(snapshot Snapshot) string {
         { label: "Iterations", value: String(stats.iteration_count || 0) },
         { label: "Best Speedup", value: formatMetric(stats.best_speedup || 0, "x") },
         { label: "Unique Kernels", value: String(stats.unique_kernels || 0) },
+        { label: "Unique GPUs", value: String(stats.unique_gpus || 0) },
       ];
       const html = items.map((it) =>
         "<div class='stat-card'><div class='stat-label'>" + it.label +
@@ -775,12 +785,12 @@ func renderStaticHTML(snapshot Snapshot) string {
       const wrap = document.createElement("div");
       wrap.className = "inner-wrap";
       const table = document.createElement("table");
-      table.innerHTML = "<thead><tr><th>iter</th><th>commit</th><th>time</th><th>subject</th><th>correctness</th><th>speedup</th><th>latency</th><th>inspect</th></tr></thead>";
+      table.innerHTML = "<thead><tr><th>iter</th><th>commit</th><th>time</th><th>subject</th><th>gpu</th><th>correctness</th><th>speedup</th><th>latency</th><th>inspect</th></tr></thead>";
       const body = document.createElement("tbody");
       const iterations = run.iterations || [];
       if (!iterations.length) {
         const tr = document.createElement("tr");
-        tr.innerHTML = "<td class='muted' colspan='8'>No commit details found.</td>";
+        tr.innerHTML = "<td class='muted' colspan='9'>No commit details found.</td>";
         body.appendChild(tr);
       } else {
         iterations.forEach((it) => {
@@ -790,6 +800,7 @@ func renderStaticHTML(snapshot Snapshot) string {
             "<td><code>" + shortHash(it.commit_hash || "") + "</code></td>" +
             "<td>" + escapeHtml(safeText(it.commit_time, "-")) + "</td>" +
             "<td>" + escapeHtml(safeText(it.subject, "-")) + "</td>" +
+            "<td>" + escapeHtml(safeText(it.gpu, "-")) + "</td>" +
             "<td>" + correctnessBadge(it.correctness) + "</td>" +
             "<td>" + formatMetric(it.speedup_vs_baseline, "x") + "</td>" +
             "<td>" + formatMetric(it.latency_us, " us") + "</td>" +
@@ -812,6 +823,7 @@ func renderStaticHTML(snapshot Snapshot) string {
       document.getElementById("modalMeta").textContent =
         "run: " + safeText(run.run_id, "-") +
         " | branch: " + safeText(run.branch, "-") +
+        " | gpu: " + safeText(it.gpu, "-") +
         " | time: " + safeText(it.commit_time, "-");
       document.getElementById("modalHypothesis").textContent = safeText(it.hypothesis, "-");
       document.getElementById("modalChanges").textContent =
