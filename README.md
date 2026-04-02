@@ -61,6 +61,7 @@ Notes:
 - Structured fields are parsed from commit body when present:
   - `kernel:`
   - `agent:`
+  - `gpu:` (e.g. `H800`, `B200`)
   - `correctness:`
   - `speedup_vs_baseline:`
   - `latency_us:`

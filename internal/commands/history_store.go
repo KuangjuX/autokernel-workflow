@@ -159,6 +159,7 @@ func initHistorySchema(db *sql.DB) error {
 			analysis TEXT NOT NULL DEFAULT '',
 			kernel TEXT NOT NULL DEFAULT '',
 			agent TEXT NOT NULL DEFAULT '',
+			gpu TEXT NOT NULL DEFAULT '',
 			correctness TEXT NOT NULL DEFAULT '',
 			speedup_vs_baseline REAL,
 			latency_us REAL,
@@ -197,6 +198,7 @@ func ensureHistorySchemaCompat(db *sql.DB) error {
 	}{
 		{column: "changes", ddlType: "TEXT NOT NULL DEFAULT ''"},
 		{column: "analysis", ddlType: "TEXT NOT NULL DEFAULT ''"},
+		{column: "gpu", ddlType: "TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, migration := range iterationMigrations {
 		has, err := tableHasColumn(db, "iterations", migration.column)
@@ -433,9 +435,9 @@ func insertRunTx(tx *sql.Tx, run RunRecord) error {
 		if _, err := tx.Exec(
 			`INSERT INTO iterations (
 				run_row_id, iteration, commit_hash, parent_commit_hash, commit_time,
-				subject, hypothesis, changes, analysis, kernel, agent, correctness,
+				subject, hypothesis, changes, analysis, kernel, agent, gpu, correctness,
 				speedup_vs_baseline, latency_us, patch, patch_error
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			runRowID,
 			it.Iteration,
 			it.CommitHash,
@@ -447,6 +449,7 @@ func insertRunTx(tx *sql.Tx, run RunRecord) error {
 			it.Analysis,
 			it.Kernel,
 			it.Agent,
+			it.GPU,
 			it.Correctness,
 			speedup,
 			latency,
@@ -552,7 +555,7 @@ func queryIterationsForRun(db *sql.DB, runRowID int64) ([]IterationRecord, error
 	rows, err := db.Query(
 		`SELECT
 			iteration, commit_hash, parent_commit_hash, commit_time, subject, hypothesis,
-			changes, analysis, kernel, agent, correctness, speedup_vs_baseline,
+			changes, analysis, kernel, agent, gpu, correctness, speedup_vs_baseline,
 			latency_us, patch, patch_error
 		 FROM iterations
 		 WHERE run_row_id = ?
@@ -580,6 +583,7 @@ func queryIterationsForRun(db *sql.DB, runRowID int64) ([]IterationRecord, error
 			&it.Analysis,
 			&it.Kernel,
 			&it.Agent,
+			&it.GPU,
 			&it.Correctness,
 			&speedup,
 			&latency,
