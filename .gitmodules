@@ -1,3 +1,6 @@
 [submodule "third_party/AKO4ALL"]
 	path = third_party/AKO4ALL
 	url = https://github.com/KuangjuX/AKO4ALL.git
+[submodule "third_party/ptx-isa-markdown"]
+	path = third_party/ptx-isa-markdown
+	url = git@github.com:KuangjuX/ptx-isa-markdown.git
