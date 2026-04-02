@@ -1,11 +1,16 @@
 package cli
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 
 	"kernelhub/internal/commands"
+	"kernelhub/internal/server"
 )
 
 func Run(args []string) error {
@@ -30,6 +35,8 @@ func Run(args []string) error {
 		return runExport(args[1:])
 	case "serve":
 		return runServe(args[1:])
+	case "server":
+		return runServer(args[1:])
 	default:
 		printRootUsage()
 		return fmt.Errorf("unknown command: %s", args[0])
@@ -49,6 +56,7 @@ Commands:
   restore-git Restore archived git objects from history DB
   export     Export static snapshot/dashboard from history data (skeleton)
   serve      Start local HTTP dashboard powered by history DB
+  server     Start KernelHub API server with rate limiting
 
 Use "kernelhub <command> --help" for command-specific flags.`)
 }
@@ -185,4 +193,44 @@ func runServe(args []string) error {
 		DBPath:     *dbPath,
 		ListenAddr: *listen,
 	})
+}
+
+func runServer(args []string) error {
+	fs := flag.NewFlagSet("server", flag.ContinueOnError)
+	listen := fs.String("listen", "127.0.0.1:8080", "Listen address (host:port)")
+	dbPath := fs.String("db-path", "./workspace/history.db", "Path to history SQLite DB")
+	rps := fs.Float64("rate-limit-rps", 10, "Sustained requests per second per IP")
+	burst := fs.Int("rate-limit-burst", 30, "Max burst size above sustained rate")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+
+	cfg := server.Config{
+		ListenAddr: *listen,
+		DBPath:     *dbPath,
+		RateLimit: server.RateLimitConfig{
+			RequestsPerSecond: *rps,
+			Burst:             *burst,
+			CleanupInterval:   server.DefaultRateLimitConfig().CleanupInterval,
+		},
+	}
+
+	srv := server.New(cfg)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- srv.ListenAndServe() }()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-ctx.Done():
+		fmt.Println("\n[kernelhub server] shutting down...")
+		return srv.Shutdown(context.Background())
+	}
 }
