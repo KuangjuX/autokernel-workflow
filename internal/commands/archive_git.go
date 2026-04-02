@@ -114,14 +114,7 @@ func ArchiveGit(opts ArchiveGitOptions) error {
 		return nil
 	}
 
-	history, err := loadHistory(opts.DBPath)
-	if err != nil {
-		return err
-	}
-	history.GeneratedAt = time.Now().UTC().Format(time.RFC3339)
-	history.Archives = append(history.Archives, record)
-
-	if err := saveHistory(opts.DBPath, history); err != nil {
+	if err := appendArchive(opts.DBPath, record); err != nil {
 		return err
 	}
 
