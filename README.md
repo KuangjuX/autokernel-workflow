@@ -10,6 +10,7 @@ Scope intentionally kept small:
 4. `restore-git` - restore archived git bundles from history DB
 5. `serve` - start a local HTTP dashboard backed by SQLite
 6. `export` - export static snapshot/dashboard for offline viewing
+7. `server` - start versioned KernelHub API service with ingest endpoints
 
 AKO4ALL engine is pinned as submodule:
 
@@ -99,6 +100,113 @@ Endpoints:
 - `GET /api/snapshot` (`?include_patches=1` to embed commit patches)
 - `GET /api/patch?repo_path=...&commit=...&parent=...`
 - `GET /healthz`
+
+## Command: server
+
+Start the versioned KernelHub API service with per-IP rate limiting.
+
+```bash
+./bin/kernelhub server \
+  --db-path ./workspace/history.db \
+  --listen 127.0.0.1:8080 \
+  --rate-limit-rps 10 \
+  --rate-limit-burst 30
+```
+
+Open [http://127.0.0.1:8080](http://127.0.0.1:8080) in browser.
+
+API v1 read endpoints:
+
+- `GET /api/v1/snapshot` (`?include_patches=1` to embed commit patches)
+- `GET /api/v1/patch?repo_path=...&commit=...&parent=...`
+- `GET /healthz`
+
+API v1 ingest endpoints (`POST`, JSON):
+
+- `POST /api/v1/runs`
+- `POST /api/v1/iterations`
+- `POST /api/v1/archives`
+
+Write API requirements:
+
+- Must include `Content-Type: application/json`
+- Must include `Idempotency-Key: <unique-key>`
+
+Idempotency semantics:
+
+- Same key + same request body: server replays original response and sets
+  `X-Idempotent-Replay: true`
+- Same key + different request body: `409` with `error=idempotency_key_conflict`
+
+Unified error envelope (all API errors):
+
+```json
+{
+  "error": "run_id_required",
+  "message": "run_id is required",
+  "code": 400
+}
+```
+
+Quick ingest examples:
+
+```bash
+curl -X POST "http://127.0.0.1:8080/api/v1/runs" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: run-run-gemm-001-v1" \
+  -d '{
+    "run_id":"run-gemm-001",
+    "branch":"agent/gemm_bf16_nt/agent-a",
+    "repo_path":"./third_party/AKO4ALL",
+    "synced_at":"2026-04-02T12:00:00Z",
+    "commit_count":1,
+    "iterations":[
+      {
+        "iteration":0,
+        "commit_hash":"abc123",
+        "parent_commit_hash":"def456",
+        "commit_time":"2026-04-02T11:58:00Z",
+        "subject":"exp 0: initial candidate",
+        "hypothesis":"baseline comparison"
+      }
+    ]
+  }'
+```
+
+```bash
+curl -X POST "http://127.0.0.1:8080/api/v1/iterations" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: it-run-gemm-001-1-v1" \
+  -d '{
+    "run_id":"run-gemm-001",
+    "iteration":{
+      "iteration":1,
+      "commit_hash":"fedcba",
+      "parent_commit_hash":"abc123",
+      "commit_time":"2026-04-02T12:05:00Z",
+      "subject":"exp 1: unroll tuning",
+      "hypothesis":"better occupancy"
+    }
+  }'
+```
+
+```bash
+curl -X POST "http://127.0.0.1:8080/api/v1/archives" \
+  -H "Content-Type: application/json" \
+  -H "Idempotency-Key: arc-run-gemm-001-v1" \
+  -d '{
+    "id":"arc-20260402-120500-abc123",
+    "run_id":"run-gemm-001",
+    "branch":"agent/gemm_bf16_nt/agent-a",
+    "repo_path":"./third_party/AKO4ALL",
+    "head_commit":"fedcba",
+    "created_at":"2026-04-02T12:05:00Z",
+    "bundle_format":"git-bundle+gzip+base64",
+    "bundle_sha256":"placeholder-sha256",
+    "bundle_size_bytes":1234,
+    "bundle_data":"H4sIAAAAAAAA..."
+  }'
+```
 
 ## Command: archive-git
 
