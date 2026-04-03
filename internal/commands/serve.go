@@ -261,6 +261,16 @@ func renderServeHTML() string {
       background: rgba(210, 153, 34, 0.16);
       color: #f5d58a;
     }
+    .badge-triton {
+      border-color: #2d4a7a;
+      background: rgba(56, 139, 253, 0.15);
+      color: #79c0ff;
+    }
+    .badge-cuda {
+      border-color: #5a3e2b;
+      background: rgba(210, 120, 50, 0.16);
+      color: #f0b070;
+    }
     .modal {
       position: fixed;
       inset: 0;
@@ -369,7 +379,7 @@ func renderServeHTML() string {
 
     <div class="panel">
       <table>
-        <thead><tr><th>run_id</th><th>branch</th><th>commits</th><th>latest_commit</th><th>details</th></tr></thead>
+        <thead><tr><th>run_id</th><th>branch</th><th>backend</th><th>commits</th><th>latest_commit</th><th>details</th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
@@ -543,6 +553,7 @@ func renderServeHTML() string {
         tr.innerHTML =
           "<td><code>" + escapeHtml(safeText(run.run_id, "-")) + "</code></td>" +
           "<td>" + escapeHtml(safeText(run.branch, "-")) + "</td>" +
+          "<td>" + backendBadge(inferRunBackend(run)) + "</td>" +
           "<td>" + escapeHtml(safeText(run.commit_count, "0")) + "</td>" +
           "<td><code>" + shortHash(latest) + "</code></td>" +
           "<td><button class='btn small run-toggle' data-target='" + detailID + "'>Show</button></td>";
@@ -552,7 +563,7 @@ func renderServeHTML() string {
         detailRow.id = detailID;
         detailRow.className = "hidden";
         const detailCell = document.createElement("td");
-        detailCell.colSpan = 5;
+        detailCell.colSpan = 6;
         detailCell.className = "details-cell";
         detailCell.appendChild(renderRunDetails(run));
         detailRow.appendChild(detailCell);
@@ -566,17 +577,33 @@ func renderServeHTML() string {
       return "<span class='" + cls + "'>" + escapeHtml(text) + "</span>";
     }
 
+    function backendBadge(backend) {
+      const text = safeText(backend, "").toLowerCase();
+      if (!text) return "<span class='muted'>-</span>";
+      const cls = text === "triton" ? "badge badge-triton" : "badge badge-cuda";
+      return "<span class='" + cls + "'>" + escapeHtml(text) + "</span>";
+    }
+
+    function inferRunBackend(run) {
+      const its = run.iterations || [];
+      for (let i = its.length - 1; i >= 0; i--) {
+        const b = safeText(its[i].backend, "").toLowerCase();
+        if (b) return b;
+      }
+      return "";
+    }
+
     function renderRunDetails(run) {
       const wrap = document.createElement("div");
       wrap.className = "inner-wrap";
 
       const table = document.createElement("table");
-      table.innerHTML = "<thead><tr><th>iter</th><th>commit</th><th>time</th><th>subject</th><th>gpu</th><th>correctness</th><th>speedup</th><th>latency</th><th>inspect</th></tr></thead>";
+      table.innerHTML = "<thead><tr><th>iter</th><th>commit</th><th>time</th><th>subject</th><th>gpu</th><th>backend</th><th>correctness</th><th>speedup</th><th>latency</th><th>inspect</th></tr></thead>";
       const body = document.createElement("tbody");
       const iterations = run.iterations || [];
       if (!iterations.length) {
         const tr = document.createElement("tr");
-        tr.innerHTML = "<td class='muted' colspan='9'>No commit details found.</td>";
+        tr.innerHTML = "<td class='muted' colspan='10'>No commit details found.</td>";
         body.appendChild(tr);
       } else {
         iterations.forEach((it) => {
@@ -587,6 +614,7 @@ func renderServeHTML() string {
             "<td>" + escapeHtml(safeText(it.commit_time, "-")) + "</td>" +
             "<td>" + escapeHtml(safeText(it.subject, "-")) + "</td>" +
             "<td>" + escapeHtml(safeText(it.gpu, "-")) + "</td>" +
+            "<td>" + backendBadge(it.backend) + "</td>" +
             "<td>" + correctnessBadge(it.correctness) + "</td>" +
             "<td>" + formatMetric(it.speedup_vs_baseline, "x") + "</td>" +
             "<td>" + formatMetric(it.latency_us, " us") + "</td>" +
@@ -615,6 +643,7 @@ func renderServeHTML() string {
         "run: " + safeText(run.run_id, "-") +
         " | branch: " + safeText(run.branch, "-") +
         " | gpu: " + safeText(it.gpu, "-") +
+        " | backend: " + safeText(it.backend, "-") +
         " | time: " + safeText(it.commit_time, "-");
       document.getElementById("modalHypothesis").textContent = safeText(it.hypothesis, "-");
 
