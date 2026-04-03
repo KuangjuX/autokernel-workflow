@@ -94,6 +94,7 @@ func runSyncGit(args []string) error {
 	dbPath := fs.String("db-path", "./workspace/history.db", "History DB path")
 	runID := fs.String("run-id", "", "Optional run id override")
 	dryRun := fs.Bool("dry-run", false, "Print actions only")
+	force := fs.Bool("force", false, "Bypass history integrity check")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -106,6 +107,7 @@ func runSyncGit(args []string) error {
 		DBPath:   *dbPath,
 		RunID:    *runID,
 		DryRun:   *dryRun,
+		Force:    *force,
 	})
 }
 

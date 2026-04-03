@@ -18,6 +18,7 @@ type SyncGitOptions struct {
 	DBPath   string
 	RunID    string
 	DryRun   bool
+	Force    bool
 }
 
 type HistoryFile struct {
@@ -82,6 +83,21 @@ func SyncGit(opts SyncGitOptions) error {
 	if len(records) == 0 {
 		fmt.Println("[kernelhub sync-git] no commits found")
 		return nil
+	}
+
+	var allWarnings []string
+	allWarnings = append(allWarnings, validateHistoryIntegrity(records)...)
+	allWarnings = append(allWarnings, validateReflog(repoAbs, opts.Branch)...)
+
+	if len(allWarnings) > 0 {
+		fmt.Println("[kernelhub sync-git] ⚠️  HISTORY INTEGRITY WARNINGS:")
+		for _, w := range allWarnings {
+			fmt.Printf("  - %s\n", w)
+		}
+		if !opts.Force {
+			return fmt.Errorf("history integrity check failed with %d warning(s); fix the branch or use --force to bypass", len(allWarnings))
+		}
+		fmt.Println("[kernelhub sync-git] --force specified, proceeding despite warnings")
 	}
 
 	runID := opts.RunID
@@ -319,4 +335,66 @@ func parseFloat(s string) (float64, bool) {
 		return 0, false
 	}
 	return v, true
+}
+
+// validateHistoryIntegrity checks the commit chain for signs of
+// history rewriting (git reset, git rebase, git commit --amend).
+// Two checks are performed:
+//  1. Parent-chain continuity: each commit's parent must be the previous commit.
+//  2. Reflog analysis: scan the branch reflog for reset/rebase/amend entries.
+func validateHistoryIntegrity(records []IterationRecord) []string {
+	var warnings []string
+	if len(records) < 2 {
+		return warnings
+	}
+
+	for i := 1; i < len(records); i++ {
+		prev := records[i-1]
+		curr := records[i]
+		if curr.ParentCommitHash == "" {
+			continue
+		}
+		if curr.ParentCommitHash != prev.CommitHash {
+			warnings = append(warnings, fmt.Sprintf(
+				"commit %d (%s %.8s) parent is %.8s, but previous commit is %.8s — "+
+					"the chain is broken (possible git reset/rebase detected)",
+				i, curr.Subject, curr.CommitHash,
+				curr.ParentCommitHash, prev.CommitHash,
+			))
+		}
+	}
+
+	return warnings
+}
+
+// validateReflog checks the branch reflog for destructive operations.
+// Returns warnings for any reset, rebase, or amend entries found.
+func validateReflog(repoPath, branch string) []string {
+	cmd := exec.Command("git", "-C", repoPath, "reflog", "show", branch,
+		"--pretty=format:%H %gD %gs")
+	out, err := cmd.Output()
+	if err != nil {
+		return nil
+	}
+
+	var warnings []string
+	reReset := regexp.MustCompile(`(?i)\breset:\s`)
+	reRebase := regexp.MustCompile(`(?i)\brebase\b`)
+	reAmend := regexp.MustCompile(`(?i)\bamend\b`)
+
+	for _, line := range strings.Split(string(out), "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		switch {
+		case reReset.MatchString(line):
+			warnings = append(warnings, fmt.Sprintf("reflog contains reset operation: %s", line))
+		case reRebase.MatchString(line):
+			warnings = append(warnings, fmt.Sprintf("reflog contains rebase operation: %s", line))
+		case reAmend.MatchString(line):
+			warnings = append(warnings, fmt.Sprintf("reflog contains amend operation: %s", line))
+		}
+	}
+	return warnings
 }

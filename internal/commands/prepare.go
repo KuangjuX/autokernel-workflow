@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -130,8 +131,84 @@ func Prepare(opts PrepareOptions) error {
 		}
 	}
 
+	if !opts.DryRun {
+		if err := installGitGuardHooks(akoRoot); err != nil {
+			fmt.Printf("[kernelhub prepare] WARNING: failed to install git guard hooks: %v\n", err)
+		}
+	}
+
 	fmt.Printf("[kernelhub prepare] run_id=%s prepared\n", runID)
 	return nil
+}
+
+func installGitGuardHooks(akoRoot string) error {
+	gitDir := resolveGitDir(akoRoot)
+	if gitDir == "" {
+		return fmt.Errorf("cannot locate .git directory for %s", akoRoot)
+	}
+
+	hooksDir := filepath.Join(gitDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o755); err != nil {
+		return err
+	}
+
+	postRewriteHook := `#!/bin/bash
+# KernelHub guard: reject history-rewriting operations (rebase, amend)
+# Installed by: kernelhub prepare
+ACTION="$1"
+echo ""
+echo "╔══════════════════════════════════════════════════════════════╗"
+echo "║  ⛔ KERNELHUB GUARD: FORBIDDEN GIT OPERATION DETECTED       ║"
+echo "╠══════════════════════════════════════════════════════════════╣"
+echo "║  Action: $ACTION"
+echo "║"
+echo "║  git rebase and git commit --amend are FORBIDDEN in         ║"
+echo "║  AKO4ALL optimization runs. They rewrite commit history     ║"
+echo "║  and will cause kernelhub sync-git to REJECT this run.      ║"
+echo "║                                                             ║"
+echo "║  Use 'git revert <hash>' to undo bad iterations instead.   ║"
+echo "╚══════════════════════════════════════════════════════════════╝"
+echo ""
+echo "[KernelHub] WARNING: The $ACTION has already been applied."
+echo "[KernelHub] Your run history is now corrupted. You must either:"
+echo "  1. Undo this manually (git reflog + git reset to restore), or"
+echo "  2. Restart the optimization run from scratch."
+echo ""
+exit 0
+`
+
+	hookPath := filepath.Join(hooksDir, "post-rewrite")
+	if err := os.WriteFile(hookPath, []byte(postRewriteHook), 0o755); err != nil {
+		return err
+	}
+
+	fmt.Printf("[kernelhub prepare] installed git guard hook: %s\n", hookPath)
+	return nil
+}
+
+func resolveGitDir(repoPath string) string {
+	gitPath := filepath.Join(repoPath, ".git")
+	info, err := os.Stat(gitPath)
+	if err != nil {
+		return ""
+	}
+	if info.IsDir() {
+		return gitPath
+	}
+	content, err := os.ReadFile(gitPath)
+	if err != nil {
+		return ""
+	}
+	line := strings.TrimSpace(string(content))
+	const prefix = "gitdir: "
+	if !strings.HasPrefix(line, prefix) {
+		return ""
+	}
+	target := strings.TrimPrefix(line, prefix)
+	if !filepath.IsAbs(target) {
+		target = filepath.Join(repoPath, target)
+	}
+	return target
 }
 
 func copyToTarget(src, dst string, dryRun bool) error {
