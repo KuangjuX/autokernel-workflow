@@ -165,6 +165,7 @@ func initHistorySchema(db *sql.DB) error {
 			kernel TEXT NOT NULL DEFAULT '',
 			agent TEXT NOT NULL DEFAULT '',
 			gpu TEXT NOT NULL DEFAULT '',
+			backend TEXT NOT NULL DEFAULT '',
 			correctness TEXT NOT NULL DEFAULT '',
 			speedup_vs_baseline REAL,
 			latency_us REAL,
@@ -204,6 +205,7 @@ func ensureHistorySchemaCompat(db *sql.DB) error {
 		{column: "changes", ddlType: "TEXT NOT NULL DEFAULT ''"},
 		{column: "analysis", ddlType: "TEXT NOT NULL DEFAULT ''"},
 		{column: "gpu", ddlType: "TEXT NOT NULL DEFAULT ''"},
+		{column: "backend", ddlType: "TEXT NOT NULL DEFAULT ''"},
 	}
 	for _, migration := range iterationMigrations {
 		has, err := tableHasColumn(db, "iterations", migration.column)
@@ -440,9 +442,9 @@ func insertRunTx(tx *sql.Tx, run RunRecord) error {
 		if _, err := tx.Exec(
 			`INSERT INTO iterations (
 				run_row_id, iteration, commit_hash, parent_commit_hash, commit_time,
-				subject, hypothesis, changes, analysis, kernel, agent, gpu, correctness,
-				speedup_vs_baseline, latency_us, patch, patch_error
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+				subject, hypothesis, changes, analysis, kernel, agent, gpu, backend,
+				correctness, speedup_vs_baseline, latency_us, patch, patch_error
+			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			runRowID,
 			it.Iteration,
 			it.CommitHash,
@@ -455,6 +457,7 @@ func insertRunTx(tx *sql.Tx, run RunRecord) error {
 			it.Kernel,
 			it.Agent,
 			it.GPU,
+			it.Backend,
 			it.Correctness,
 			speedup,
 			latency,
@@ -560,8 +563,8 @@ func queryIterationsForRun(db *sql.DB, runRowID int64) ([]IterationRecord, error
 	rows, err := db.Query(
 		`SELECT
 			iteration, commit_hash, parent_commit_hash, commit_time, subject, hypothesis,
-			changes, analysis, kernel, agent, gpu, correctness, speedup_vs_baseline,
-			latency_us, patch, patch_error
+			changes, analysis, kernel, agent, gpu, backend, correctness,
+			speedup_vs_baseline, latency_us, patch, patch_error
 		 FROM iterations
 		 WHERE run_row_id = ?
 		 ORDER BY id`,
@@ -589,6 +592,7 @@ func queryIterationsForRun(db *sql.DB, runRowID int64) ([]IterationRecord, error
 			&it.Kernel,
 			&it.Agent,
 			&it.GPU,
+			&it.Backend,
 			&it.Correctness,
 			&speedup,
 			&latency,
