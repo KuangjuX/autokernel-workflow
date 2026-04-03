@@ -574,6 +574,16 @@ func renderStaticHTML(snapshot Snapshot) string {
       background: rgba(210, 153, 34, 0.16);
       color: #f5d58a;
     }
+    .badge-triton {
+      border-color: #2d4a7a;
+      background: rgba(56, 139, 253, 0.15);
+      color: #79c0ff;
+    }
+    .badge-cuda {
+      border-color: #5a3e2b;
+      background: rgba(210, 120, 50, 0.16);
+      color: #f0b070;
+    }
     .modal {
       position: fixed;
       inset: 0;
@@ -676,7 +686,7 @@ func renderStaticHTML(snapshot Snapshot) string {
     <div id="stats" class="stats-grid"></div>
     <div class="panel">
       <table>
-        <thead><tr><th>run_id</th><th>branch</th><th>commits</th><th>latest_commit</th><th>details</th></tr></thead>
+        <thead><tr><th>run_id</th><th>branch</th><th>backend</th><th>commits</th><th>latest_commit</th><th>details</th></tr></thead>
         <tbody id="rows"></tbody>
       </table>
     </div>
@@ -792,6 +802,22 @@ func renderStaticHTML(snapshot Snapshot) string {
       return "<span class='" + cls + "'>" + escapeHtml(text) + "</span>";
     }
 
+    function backendBadge(backend) {
+      const text = safeText(backend, "").toLowerCase();
+      if (!text) return "<span class='muted'>-</span>";
+      const cls = text === "triton" ? "badge badge-triton" : "badge badge-cuda";
+      return "<span class='" + cls + "'>" + escapeHtml(text) + "</span>";
+    }
+
+    function inferRunBackend(run) {
+      const its = run.iterations || [];
+      for (let i = its.length - 1; i >= 0; i--) {
+        const b = safeText(its[i].backend, "").toLowerCase();
+        if (b) return b;
+      }
+      return "";
+    }
+
     function renderRunDetails(run) {
       const wrap = document.createElement("div");
       wrap.className = "inner-wrap";
@@ -831,10 +857,12 @@ func renderStaticHTML(snapshot Snapshot) string {
       modal.classList.remove("hidden");
       document.getElementById("modalTitle").textContent =
         shortHash(it.commit_hash || "") + "  " + safeText(it.subject, "-");
+      const backendText = safeText(it.backend, "");
       document.getElementById("modalMeta").textContent =
         "run: " + safeText(run.run_id, "-") +
         " | branch: " + safeText(run.branch, "-") +
         " | gpu: " + safeText(it.gpu, "-") +
+        (backendText ? " | backend: " + backendText : "") +
         " | time: " + safeText(it.commit_time, "-");
       document.getElementById("modalHypothesis").textContent = safeText(it.hypothesis, "-");
       document.getElementById("modalChanges").textContent =
@@ -870,6 +898,7 @@ func renderStaticHTML(snapshot Snapshot) string {
         tr.innerHTML =
           "<td><code>" + escapeHtml(safeText(run.run_id, "-")) + "</code></td>" +
           "<td>" + escapeHtml(safeText(run.branch, "-")) + "</td>" +
+          "<td>" + backendBadge(inferRunBackend(run)) + "</td>" +
           "<td>" + escapeHtml(safeText(run.commit_count, "0")) + "</td>" +
           "<td><code>" + shortHash(latest) + "</code></td>" +
           "<td><button class='btn run-toggle' data-target='" + detailID + "'>Show</button></td>";
@@ -879,7 +908,7 @@ func renderStaticHTML(snapshot Snapshot) string {
         detailRow.id = detailID;
         detailRow.className = "hidden";
         const detailCell = document.createElement("td");
-        detailCell.colSpan = 5;
+        detailCell.colSpan = 6;
         detailCell.className = "details-cell";
         detailCell.appendChild(renderRunDetails(run));
         detailRow.appendChild(detailCell);
