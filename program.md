@@ -147,6 +147,7 @@ For reliable parsing, include these commit body keys (exact key names):
 
 - `kernel: ...`
 - `agent: ...`
+- `backend: ...` (e.g. `triton`, `cuda`)
 - `correctness: ...`
 - `speedup_vs_baseline: ...`
 - `latency_us: ...`
@@ -166,10 +167,11 @@ exp 7: increase block_k to 128
 
 kernel: gemm_bf16_nt
 agent: agent-a
+gpu: sm90
+backend: triton
 correctness: PASS
 speedup_vs_baseline: 1.23x
 latency_us: 142.3
-gpu: sm90
 ```
 
 ## 6) Quality Gates
