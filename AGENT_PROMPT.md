@@ -81,7 +81,38 @@
 - 剩余未优化 kernel 数量
 - 累计统计（总优化数、总跳过数、平均 speedup）
 
-其余规则同上（Subagent 行为约束、优化策略指引、KernelHub 提交流程）。
+具体要求：
+
+1. 选择 kernel
+   - 通过 workspace/runs/ 和 history.db 确认哪些 kernel 已有优化分支，跳过它们
+   - 优先选择结构简单、element-wise 或 memory-bound 的 kernel（更容易出成果）
+   - 确认每个 kernel 有配套的 kernel_assets（kernel.py + reference.py），没有的话先制作
+
+2. 工作流执行
+   - 严格按 program.md 的 Step A → Step H 完整流程执行
+   - 每个 kernel 用独立 worktree + 独立分支，互不干扰
+   - 每轮内可并行启动多个 subagent 分别优化不同 kernel
+   - 每个 subagent 必须在 AKO4ALL 工作目录内独立完成全部优化迭代
+
+3. Subagent 行为约束（最重要，必须写入 subagent prompt）
+   - 必须先读 TASK.md 和 HINTS.md，遵守其中所有规则
+   - 每次迭代必须 commit，即使失败也要 commit 后 git revert
+   - ⛔ 绝对禁止：git reset、git rebase、git commit --amend
+   - 唯一允许的回退方式是 git revert
+   - 告知 subagent：kernelhub sync-git 会做 reflog 扫描，违规会导致整个 run 被拒绝
+   - 每个 commit body 必须包含结构化字段（kernel/agent/gpu/correctness/speedup_vs_baseline/latency_us/changes/analysis）
+
+4. 优化策略指引（写入 subagent prompt 供参考）
+   - Tier 1：修正 num_sms 为实际值、去掉 int64 offset、调 block_size/num_warps/num_stages
+   - Tier 2：eviction_policy、make_block_ptr、persistent vs non-persistent grid
+   - Tier 3：精度优化、向量化、寄存器压力
+   - 卡住时跑 ncu 或 WebSearch 找新思路
+   - 连续 5 次无提升就停止
+
+5. 提交到 KernelHub
+   - 每轮所有优化完成后，对每个 run 执行 sync-git → archive-git → export
+   - 如果 sync-git 报完整性警告，说明 subagent 违规了，必须修复后重新 sync
+   - 确认 dashboard HTML 中能看到所有 run 的完整迭代历史
 
 不要修改 third_party/ 下的任何内容。workspace 在项目目录下创建。
 ```
