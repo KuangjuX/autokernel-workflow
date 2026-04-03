@@ -48,6 +48,7 @@ type IterationRecord struct {
 	Kernel            string  `json:"kernel,omitempty"`
 	Agent             string  `json:"agent,omitempty"`
 	GPU               string  `json:"gpu,omitempty"`
+	Backend           string  `json:"backend,omitempty"`
 	Correctness       string  `json:"correctness,omitempty"`
 	SpeedupVsBaseline float64 `json:"speedup_vs_baseline,omitempty"`
 	LatencyUs         float64 `json:"latency_us,omitempty"`
@@ -190,6 +191,10 @@ func collectGitRecords(repoPath, branch string) ([]IterationRecord, error) {
 				fields["device"],
 				fields["card"],
 				extractField(`(?mi)^(?:gpu|gpu_model|device|card):\s*(.+)$`, body),
+			),
+			Backend: firstNonEmpty(
+				fields["backend"],
+				extractField(`(?mi)^backend:\s*(.+)$`, body),
 			),
 			Correctness: firstNonEmpty(fields["correctness"], extractField(`(?m)^correctness:\s*(.+)$`, body)),
 		}
