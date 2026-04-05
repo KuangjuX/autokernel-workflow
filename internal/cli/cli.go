@@ -54,7 +54,7 @@ Commands:
   sync-git   Parse AKO4ALL branch commits into KernelHub history (skeleton)
   archive-git Archive git objects into history DB for offline restore
   restore-git Restore archived git objects from history DB
-  export     Export static snapshot/dashboard from history data (skeleton)
+  export     Export self-contained static HTML dashboard for offline viewing
   serve      Start local HTTP dashboard powered by history DB
   server     Start KernelHub API server with rate limiting
 
@@ -114,9 +114,7 @@ func runSyncGit(args []string) error {
 func runExport(args []string) error {
 	fs := flag.NewFlagSet("export", flag.ContinueOnError)
 	dbPath := fs.String("db-path", "./workspace/history.db", "History DB path")
-	outPath := fs.String("out", "./workspace/history_snapshot.json", "Snapshot output path")
 	htmlOut := fs.String("html-out", "./workspace/history_dashboard.html", "Static HTML output path")
-	format := fs.String("format", "json", "Output format: json|toml")
 	dryRun := fs.Bool("dry-run", false, "Print actions only")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -125,11 +123,9 @@ func runExport(args []string) error {
 		return err
 	}
 	return commands.Export(commands.ExportOptions{
-		DBPath:  *dbPath,
-		OutPath: *outPath,
+		DBPath: *dbPath,
 		HTMLOut: *htmlOut,
-		Format:  *format,
-		DryRun:  *dryRun,
+		DryRun: *dryRun,
 	})
 }
 
