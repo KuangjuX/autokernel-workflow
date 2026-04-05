@@ -9,7 +9,7 @@ Scope intentionally kept small:
 3. `archive-git` - archive git bundles into history DB for offline restore
 4. `restore-git` - restore archived git bundles from history DB
 5. `serve` - start a local HTTP dashboard backed by SQLite
-6. `export` - export static snapshot/dashboard for offline viewing
+6. `export` - export self-contained static HTML dashboard for offline viewing
 7. `server` - start versioned KernelHub API service with ingest endpoints
 
 AKO4ALL engine is pinned as submodule:
@@ -69,19 +69,18 @@ Notes:
 
 ## Command: export
 
-Generate static snapshot and dashboard HTML (optional for offline sharing).
+Generate a self-contained static HTML dashboard for offline sharing.
 
 ```bash
 ./bin/kernelhub export \
   --db-path ./workspace/history.db \
-  --out ./workspace/history_snapshot.json \
-  --html-out ./workspace/history_dashboard.html \
-  --format json
+  --html-out ./workspace/history_dashboard.html
 ```
 
 Open `workspace/history_dashboard.html` directly in browser.
-In the run details table, click the `View` button in the `patch` column to
-expand the generated commit patch.
+
+For JSON snapshot data, use the `server` API instead:
+`GET /api/v1/snapshot?include_patches=1`
 
 ## Command: serve
 
