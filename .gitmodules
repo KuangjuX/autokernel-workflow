@@ -4,3 +4,6 @@
 [submodule "third_party/ptx-isa-markdown"]
 	path = third_party/ptx-isa-markdown
 	url = git@github.com:KuangjuX/ptx-isa-markdown.git
+[submodule "third_party/kernel-adapater"]
+	path = third_party/kernel-adapater
+	url = git@github.com:KuangjuX/kernel-adapater.git
