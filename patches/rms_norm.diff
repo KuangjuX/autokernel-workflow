@@ -1,0 +1,25 @@
+--- /home/chengqi/mimikyu/mmq_kernels/mmq_kernels/triton_kernels/rms_norm.py
++++ /home/chengqi/mimikyu/mmq_kernels/mmq_kernels/triton_kernels/rms_norm.py (optimized)
+@@ -30,7 +30,7 @@
+     values={"col_pow2": lambda args: triton.next_power_of_2(args["cols"])}
+ )
+ @triton.jit
+-def _rms_norm_forward_kernel(  # pylint: disable=too-many-arguments, too-many-locals
++def _rms_norm_forward_kernel(
+     hidden_states_ptr: tl.tensor,
+     gamma_ptr: tl.tensor,
+     out_ptr: tl.tensor,
+@@ -49,10 +49,12 @@
+         gamma_shm += 1.0
+ 
+     for row_id in tl.range(tl.program_id(0), rows, num_sms, num_stages=num_stage):
+-        offs = (row_id * cols + cols_off).to(tl.int64)
++        offs = row_id * cols + cols_off
+         x = tl.load(hidden_states_ptr + offs, mask=mask, other=0.0).to(tl.float32)
+         out, _ = _do_rms_norm(x, gamma_shm, cols, eps)
+         tl.store(out_ptr + offs, out, mask=mask)
++
++
+ 
+ 
+ @enable_kernel_log

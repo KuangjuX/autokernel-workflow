@@ -1,0 +1,71 @@
+--- /dev/null
++++ topk_to_multihot.cuh (optimized)
+@@ -0,0 +1,68 @@
++#include <torch/extension.h>
++#include <ATen/cuda/CUDAContext.h>
++#include <cuda_runtime.h>
++#include <cstdint>
++
++static constexpr int BLOCK_SIZE = 128;
++
++template <int K, int NumExperts>
++__global__ void __launch_bounds__(BLOCK_SIZE, 4)
++topk_to_multihot_kernel(const int64_t * __restrict__ topk,
++                        int32_t * __restrict__ multihot,
++                        int rows) {
++    const int32_t num_thread_per_grid = gridDim.x * blockDim.x;
++    for (int32_t row_id = threadIdx.x + blockIdx.x * BLOCK_SIZE;
++         row_id < rows;
++         row_id += num_thread_per_grid) {
++
++        // Load all K topk values via vectorized int2 loads (each int2 = one int64)
++        int64_t topk_vals[K];
++        const int2* topk_v = reinterpret_cast<const int2*>(topk + row_id * K);
++        #pragma unroll
++        for (int j = 0; j < K; ++j) {
++            int2 v = topk_v[j];
++            topk_vals[j] = reinterpret_cast<int64_t&>(v);
++        }
++
++        // Build multihot in registers
++        int32_t multihot_reg[NumExperts];
++        #pragma unroll
++        for (int j = 0; j < NumExperts; ++j) {
++            multihot_reg[j] = 0;
++        }
++        #pragma unroll
++        for (int j = 0; j < K; ++j) {
++            int64_t t = topk_vals[j];
++            if (t >= 0) {
++                multihot_reg[t] = 1;
++            }
++        }
++
++        // Vectorized int4 store: 8 int32 = 2 int4 (16 bytes each)
++        int4* out_v = reinterpret_cast<int4*>(multihot + row_id * NumExperts);
++        int4 v0, v1;
++        v0.x = multihot_reg[0]; v0.y = multihot_reg[1];
++        v0.z = multihot_reg[2]; v0.w = multihot_reg[3];
++        v1.x = multihot_reg[4]; v1.y = multihot_reg[5];
++        v1.z = multihot_reg[6]; v1.w = multihot_reg[7];
++        out_v[0] = v0;
++        out_v[1] = v1;
++    }
++}
++
++torch::Tensor topk_to_multihot_cuda(torch::Tensor topk, int64_t num_experts) {
++    const int rows = topk.size(0);
++    auto multihot = torch::empty({rows, num_experts},
++        torch::TensorOptions().dtype(torch::kInt32).device(topk.device()));
++    if (rows == 0) {
++        return multihot;
++    }
++    const int blocks = (rows + BLOCK_SIZE - 1) / BLOCK_SIZE;
++    topk_to_multihot_kernel<6, 8><<<blocks, BLOCK_SIZE, 0,
++        at::cuda::getCurrentCUDAStream()>>>(
++        topk.data_ptr<int64_t>(),
++        multihot.data_ptr<int32_t>(),
++        rows
++    );
++    return multihot;
++}

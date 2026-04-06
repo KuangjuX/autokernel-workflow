@@ -1,0 +1,7 @@
+{
+  "kernel_name": "rms_norm",
+  "source_path": "/home/chengqi/mimikyu/mmq_kernels/mmq_kernels/triton_kernels/rms_norm.py",
+  "backend": "triton",
+  "speedup": null,
+  "commit_hash": ""
+}

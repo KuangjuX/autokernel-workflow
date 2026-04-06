@@ -1,0 +1,7 @@
+{
+  "kernel_name": "topk_to_multihot",
+  "source_path": "/home/chengqi/mimikyu/mmq_kernels/mmq_kernels/jit_kernels/topk_to_multihot.py",
+  "backend": "cuda",
+  "speedup": null,
+  "commit_hash": ""
+}
