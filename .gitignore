@@ -2,3 +2,4 @@ workspace/
 bin/
 *.test
 *.txt
+workloads/
