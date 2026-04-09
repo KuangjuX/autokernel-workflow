@@ -69,6 +69,7 @@ func runPrepare(args []string) error {
 	benchSrc := fs.String("bench-src", "", "Optional custom bench source")
 	contextSrc := fs.String("context-src", "", "Optional context source")
 	runID := fs.String("run-id", "", "Optional run id")
+	workloadConfig := fs.String("workload-config", "", "Workload config JSON with kernel shapes to override in reference.py")
 	dryRun := fs.Bool("dry-run", false, "Print actions only")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -77,13 +78,14 @@ func runPrepare(args []string) error {
 		return err
 	}
 	return commands.Prepare(commands.PrepareOptions{
-		KernelSrc:    *kernelSrc,
-		AKORoot:      *akoRoot,
-		ReferenceSrc: *referenceSrc,
-		BenchSrc:     *benchSrc,
-		ContextSrc:   *contextSrc,
-		RunID:        *runID,
-		DryRun:       *dryRun,
+		KernelSrc:      *kernelSrc,
+		AKORoot:        *akoRoot,
+		ReferenceSrc:   *referenceSrc,
+		BenchSrc:       *benchSrc,
+		ContextSrc:     *contextSrc,
+		RunID:          *runID,
+		WorkloadConfig: *workloadConfig,
+		DryRun:         *dryRun,
 	})
 }
 

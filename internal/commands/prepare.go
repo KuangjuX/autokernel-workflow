@@ -7,18 +7,29 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
 
 type PrepareOptions struct {
-	KernelSrc    string
-	AKORoot      string
-	ReferenceSrc string
-	BenchSrc     string
-	ContextSrc   string
-	RunID        string
-	DryRun       bool
+	KernelSrc      string
+	AKORoot        string
+	ReferenceSrc   string
+	BenchSrc       string
+	ContextSrc     string
+	RunID          string
+	WorkloadConfig string
+	DryRun         bool
+}
+
+type WorkloadConfig struct {
+	Name        string                       `json:"name"`
+	Description string                       `json:"description"`
+	Model       map[string]interface{}       `json:"model"`
+	Training    map[string]interface{}       `json:"training"`
+	Shapes      map[string]map[string]int64  `json:"shapes"`
 }
 
 func Prepare(opts PrepareOptions) error {
@@ -96,7 +107,38 @@ func Prepare(opts PrepareOptions) error {
 		}
 	}
 
-	manifest := map[string]string{
+	// Apply workload config shape overrides to reference.py if provided.
+	var wlCfg *WorkloadConfig
+	if opts.WorkloadConfig != "" {
+		cfgPath, err := filepath.Abs(opts.WorkloadConfig)
+		if err != nil {
+			return err
+		}
+		wlCfg, err = loadWorkloadConfig(cfgPath)
+		if err != nil {
+			return fmt.Errorf("failed to load workload config: %w", err)
+		}
+		fmt.Printf("[kernelhub prepare] loaded workload config: %s (%s)\n", wlCfg.Name, cfgPath)
+
+		if opts.ReferenceSrc != "" {
+			kernelName := deriveKernelName(opts.ReferenceSrc)
+			if shapes, ok := wlCfg.Shapes[kernelName]; ok {
+				refDst := filepath.Join(inputDir, filepath.Base(opts.ReferenceSrc))
+				// In dry-run mode the file hasn't been copied yet; read from source.
+				readPath := refDst
+				if opts.DryRun {
+					readPath, _ = filepath.Abs(opts.ReferenceSrc)
+				}
+				if err := applyShapeOverrides(readPath, refDst, shapes, opts.DryRun); err != nil {
+					return fmt.Errorf("failed to apply shape overrides for %s: %w", kernelName, err)
+				}
+			} else {
+				fmt.Printf("[kernelhub prepare] WARNING: no shapes defined for kernel %q in workload config\n", kernelName)
+			}
+		}
+	}
+
+	manifest := map[string]interface{}{
 		"run_id":           runID,
 		"generated_at":     time.Now().UTC().Format(time.RFC3339),
 		"ako_root":         akoRoot,
@@ -113,6 +155,20 @@ func Prepare(opts PrepareOptions) error {
 	}
 	if opts.ContextSrc != "" {
 		manifest["context_src"] = opts.ContextSrc
+	}
+	if wlCfg != nil {
+		manifest["workload_config"] = opts.WorkloadConfig
+		manifest["workload_name"] = wlCfg.Name
+		if opts.ReferenceSrc != "" {
+			kernelName := deriveKernelName(opts.ReferenceSrc)
+			if shapes, ok := wlCfg.Shapes[kernelName]; ok {
+				shapeStrs := make(map[string]string, len(shapes))
+				for k, v := range shapes {
+					shapeStrs[k] = strconv.FormatInt(v, 10)
+				}
+				manifest["applied_shapes"] = shapeStrs
+			}
+		}
 	}
 
 	manifestPath := filepath.Join("workspace", "latest_prepare_manifest.json")
@@ -139,6 +195,98 @@ func Prepare(opts PrepareOptions) error {
 
 	fmt.Printf("[kernelhub prepare] run_id=%s prepared\n", runID)
 	return nil
+}
+
+func loadWorkloadConfig(path string) (*WorkloadConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var cfg WorkloadConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("invalid JSON in %s: %w", path, err)
+	}
+	if cfg.Name == "" {
+		return nil, fmt.Errorf("workload config missing required field: name")
+	}
+	if len(cfg.Shapes) == 0 {
+		return nil, fmt.Errorf("workload config has no shapes defined")
+	}
+	return &cfg, nil
+}
+
+// deriveKernelName extracts the kernel name from a reference.py path.
+// e.g. "/path/to/rms_norm_pkg/reference.py" -> "rms_norm"
+//      "/path/to/rms_norm_pkg/"              -> "rms_norm"
+func deriveKernelName(refPath string) string {
+	abs, _ := filepath.Abs(refPath)
+	dir := abs
+	if filepath.Base(abs) == "reference.py" {
+		dir = filepath.Dir(abs)
+	}
+	base := filepath.Base(dir)
+	return strings.TrimSuffix(base, "_pkg")
+}
+
+// applyShapeOverrides rewrites module-level integer constant assignments in a
+// Python reference.py file. Only assignments whose variable name appears as a
+// key in the shapes map are touched. Lines like "M = 4096" become "M = <new>".
+// Derived constants (e.g. "ROPE_DIM = HEAD_DIM - NOPE_DIM") are left alone.
+//
+// readPath is the file to read from; writePath is where to write.
+// In dry-run mode, no write occurs but changes are printed.
+func applyShapeOverrides(readPath, writePath string, shapes map[string]int64, dryRun bool) error {
+	content, err := os.ReadFile(readPath)
+	if err != nil {
+		return err
+	}
+
+	src := string(content)
+	modified := false
+
+	// Match lines like:  NAME = 1234
+	// but NOT:           NAME = OTHER_VAR - THING  (derived)
+	//                    NAME = "string"
+	assignRe := regexp.MustCompile(`(?m)^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\d+)[ \t]*$`)
+
+	result := assignRe.ReplaceAllStringFunc(src, func(match string) string {
+		parts := assignRe.FindStringSubmatch(match)
+		if len(parts) < 4 {
+			return match
+		}
+		indent := parts[1]
+		varName := parts[2]
+		oldVal := parts[3]
+
+		newVal, ok := shapes[varName]
+		if !ok {
+			return match
+		}
+
+		newValStr := strconv.FormatInt(newVal, 10)
+		if oldVal == newValStr {
+			return match
+		}
+
+		modified = true
+		if dryRun {
+			fmt.Printf("[dry-run] %s: %s = %s -> %s\n", writePath, varName, oldVal, newValStr)
+		} else {
+			fmt.Printf("[kernelhub prepare] %s: %s = %s -> %s\n", filepath.Base(writePath), varName, oldVal, newValStr)
+		}
+		return indent + varName + " = " + newValStr
+	})
+
+	if !modified {
+		fmt.Printf("[kernelhub prepare] %s: no shape changes needed\n", filepath.Base(writePath))
+		return nil
+	}
+
+	if dryRun {
+		return nil
+	}
+
+	return os.WriteFile(writePath, []byte(result), 0o644)
 }
 
 func installGitGuardHooks(akoRoot string) error {
