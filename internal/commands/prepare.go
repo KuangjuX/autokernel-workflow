@@ -25,11 +25,25 @@ type PrepareOptions struct {
 }
 
 type WorkloadConfig struct {
-	Name        string                       `json:"name"`
-	Description string                       `json:"description"`
-	Model       map[string]interface{}       `json:"model"`
-	Training    map[string]interface{}       `json:"training"`
-	Shapes      map[string]map[string]int64  `json:"shapes"`
+	Name        string                    `json:"name"`
+	Description string                    `json:"description"`
+	Model       map[string]interface{}    `json:"model"`
+	Training    map[string]interface{}    `json:"training"`
+	Shapes      map[string]ShapeEntry     `json:"shapes"`
+}
+
+type ShapeEntry struct {
+	Category     string                          `json:"category"`
+	Dims         map[string]int64                `json:"dims"`
+	InputShapes  map[string]json.RawMessage      `json:"input_shapes"`
+	DynamicRange map[string]DynamicDimRange      `json:"dynamic_range"`
+	Notes        string                          `json:"notes"`
+}
+
+type DynamicDimRange struct {
+	Min         int64 `json:"min"`
+	Max         int64 `json:"max"`
+	Theoretical int64 `json:"theoretical"`
 }
 
 func Prepare(opts PrepareOptions) error {
@@ -122,15 +136,19 @@ func Prepare(opts PrepareOptions) error {
 
 		if opts.ReferenceSrc != "" {
 			kernelName := deriveKernelName(opts.ReferenceSrc)
-			if shapes, ok := wlCfg.Shapes[kernelName]; ok {
+			entry, matchedKey := lookupShapeEntry(wlCfg.Shapes, kernelName)
+			if entry != nil {
+				if matchedKey != kernelName {
+					fmt.Printf("[kernelhub prepare] matched kernel %q -> workload key %q\n", kernelName, matchedKey)
+				}
 				refDst := filepath.Join(inputDir, filepath.Base(opts.ReferenceSrc))
-				// In dry-run mode the file hasn't been copied yet; read from source.
 				readPath := refDst
 				if opts.DryRun {
 					readPath, _ = filepath.Abs(opts.ReferenceSrc)
 				}
-				if err := applyShapeOverrides(readPath, refDst, shapes, opts.DryRun); err != nil {
-					return fmt.Errorf("failed to apply shape overrides for %s: %w", kernelName, err)
+				shapeConfigs := expandShapeConfigs(matchedKey, *entry, wlCfg.Name)
+				if err := applyMultiShapeOverrides(readPath, refDst, entry.Dims, shapeConfigs, opts.DryRun); err != nil {
+					return fmt.Errorf("failed to apply shape overrides for %s: %w", matchedKey, err)
 				}
 			} else {
 				fmt.Printf("[kernelhub prepare] WARNING: no shapes defined for kernel %q in workload config\n", kernelName)
@@ -161,12 +179,16 @@ func Prepare(opts PrepareOptions) error {
 		manifest["workload_name"] = wlCfg.Name
 		if opts.ReferenceSrc != "" {
 			kernelName := deriveKernelName(opts.ReferenceSrc)
-			if shapes, ok := wlCfg.Shapes[kernelName]; ok {
-				shapeStrs := make(map[string]string, len(shapes))
-				for k, v := range shapes {
+			entry, matchedKey := lookupShapeEntry(wlCfg.Shapes, kernelName)
+			if entry != nil {
+				shapeStrs := make(map[string]string, len(entry.Dims))
+				for k, v := range entry.Dims {
 					shapeStrs[k] = strconv.FormatInt(v, 10)
 				}
 				manifest["applied_shapes"] = shapeStrs
+				manifest["matched_kernel"] = matchedKey
+				shapeConfigs := expandShapeConfigs(matchedKey, *entry, wlCfg.Name)
+				manifest["shape_configs_count"] = len(shapeConfigs)
 			}
 		}
 	}
@@ -212,6 +234,11 @@ func loadWorkloadConfig(path string) (*WorkloadConfig, error) {
 	if len(cfg.Shapes) == 0 {
 		return nil, fmt.Errorf("workload config has no shapes defined")
 	}
+	for name, entry := range cfg.Shapes {
+		if len(entry.Dims) == 0 {
+			return nil, fmt.Errorf("shape entry %q has no dims", name)
+		}
+	}
 	return &cfg, nil
 }
 
@@ -228,28 +255,128 @@ func deriveKernelName(refPath string) string {
 	return strings.TrimSuffix(base, "_pkg")
 }
 
-// applyShapeOverrides rewrites module-level integer constant assignments in a
-// Python reference.py file. Only assignments whose variable name appears as a
-// key in the shapes map are touched. Lines like "M = 4096" become "M = <new>".
-// Derived constants (e.g. "ROPE_DIM = HEAD_DIM - NOPE_DIM") are left alone.
-//
-// readPath is the file to read from; writePath is where to write.
-// In dry-run mode, no write occurs but changes are printed.
-func applyShapeOverrides(readPath, writePath string, shapes map[string]int64, dryRun bool) error {
+// lookupShapeEntry finds the best matching ShapeEntry for a kernel name.
+// Tries exact match first, then tries common suffixes, then strips common
+// prefixes like "cuda_", then does prefix matching against JSON keys.
+// Returns the entry and the matched key, or nil if no match.
+func lookupShapeEntry(shapes map[string]ShapeEntry, kernelName string) (*ShapeEntry, string) {
+	candidates := []string{kernelName}
+	// Strip common prefixes from asset directory names
+	for _, prefix := range []string{"cuda_", "triton_"} {
+		if strings.HasPrefix(kernelName, prefix) {
+			candidates = append(candidates, strings.TrimPrefix(kernelName, prefix))
+		}
+	}
+	// Strip version suffixes like _v2, _v3
+	for i := len(candidates) - 1; i >= 0; i-- {
+		name := candidates[i]
+		trimmed := regexp.MustCompile(`_v\d+$`).ReplaceAllString(name, "")
+		if trimmed != name {
+			candidates = append(candidates, trimmed)
+		}
+	}
+
+	for _, name := range candidates {
+		if entry, ok := shapes[name]; ok {
+			return &entry, name
+		}
+		for _, suffix := range []string{"_forward", "_backward", "_fwd", "_bwd"} {
+			if entry, ok := shapes[name+suffix]; ok {
+				return &entry, name + suffix
+			}
+		}
+	}
+
+	// Prefix match: find all JSON keys that start with any candidate
+	var matches []string
+	for _, name := range candidates {
+		for key := range shapes {
+			if strings.HasPrefix(key, name+"_") || strings.HasPrefix(key, name+"__") {
+				matches = append(matches, key)
+			}
+		}
+	}
+	if len(matches) == 1 {
+		entry := shapes[matches[0]]
+		return &entry, matches[0]
+	}
+	return nil, ""
+}
+
+// ShapeConfig represents a single shape configuration entry for SHAPE_CONFIGS.
+type ShapeConfig struct {
+	Label string
+	Dims  map[string]int64
+}
+
+// expandShapeConfigs generates one or more ShapeConfig entries from a ShapeEntry.
+// If the entry has dynamic_range, it produces multiple configs for the nominal
+// value plus the min/max boundaries of each dynamic dimension.
+func expandShapeConfigs(kernelName string, entry ShapeEntry, workloadName string) []ShapeConfig {
+	baseDims := make(map[string]int64, len(entry.Dims))
+	for k, v := range entry.Dims {
+		baseDims[k] = v
+	}
+
+	if len(entry.DynamicRange) == 0 {
+		label := workloadName
+		if label == "" {
+			label = "default"
+		}
+		return []ShapeConfig{{Label: label, Dims: baseDims}}
+	}
+
+	var configs []ShapeConfig
+
+	// Nominal shape
+	nominalLabel := workloadName + "-nominal"
+	configs = append(configs, ShapeConfig{Label: nominalLabel, Dims: cloneDims(baseDims)})
+
+	// Min/max for each dynamic dimension
+	for dimName, dr := range entry.DynamicRange {
+		if dr.Min > 0 && dr.Min != baseDims[dimName] {
+			minDims := cloneDims(baseDims)
+			minDims[dimName] = dr.Min
+			configs = append(configs, ShapeConfig{
+				Label: fmt.Sprintf("%s-%s-min", workloadName, dimName),
+				Dims:  minDims,
+			})
+		}
+		if dr.Max > 0 && dr.Max != baseDims[dimName] {
+			maxDims := cloneDims(baseDims)
+			maxDims[dimName] = dr.Max
+			configs = append(configs, ShapeConfig{
+				Label: fmt.Sprintf("%s-%s-max", workloadName, dimName),
+				Dims:  maxDims,
+			})
+		}
+	}
+
+	return configs
+}
+
+func cloneDims(m map[string]int64) map[string]int64 {
+	out := make(map[string]int64, len(m))
+	for k, v := range m {
+		out[k] = v
+	}
+	return out
+}
+
+// applyMultiShapeOverrides rewrites a reference.py to contain both the
+// primary dimension variables and a SHAPE_CONFIGS list that bench.py can
+// iterate over. It also ensures get_inputs() accepts a shape_idx parameter.
+func applyMultiShapeOverrides(readPath, writePath string, primaryDims map[string]int64, configs []ShapeConfig, dryRun bool) error {
 	content, err := os.ReadFile(readPath)
 	if err != nil {
 		return err
 	}
 
 	src := string(content)
-	modified := false
 
-	// Match lines like:  NAME = 1234
-	// but NOT:           NAME = OTHER_VAR - THING  (derived)
-	//                    NAME = "string"
+	// Step 1: Override primary dimension variables (M = ..., N = ..., etc.)
 	assignRe := regexp.MustCompile(`(?m)^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\d+)[ \t]*$`)
-
-	result := assignRe.ReplaceAllStringFunc(src, func(match string) string {
+	src = assignRe.ReplaceAllStringFunc(src, func(match string) string {
 		parts := assignRe.FindStringSubmatch(match)
 		if len(parts) < 4 {
 			return match
@@ -257,36 +384,133 @@ func applyShapeOverrides(readPath, writePath string, shapes map[string]int64, dr
 		indent := parts[1]
 		varName := parts[2]
 		oldVal := parts[3]
-
-		newVal, ok := shapes[varName]
+		newVal, ok := primaryDims[varName]
 		if !ok {
 			return match
 		}
-
 		newValStr := strconv.FormatInt(newVal, 10)
-		if oldVal == newValStr {
-			return match
-		}
-
-		modified = true
-		if dryRun {
-			fmt.Printf("[dry-run] %s: %s = %s -> %s\n", writePath, varName, oldVal, newValStr)
-		} else {
-			fmt.Printf("[kernelhub prepare] %s: %s = %s -> %s\n", filepath.Base(writePath), varName, oldVal, newValStr)
+		if oldVal != newValStr {
+			if dryRun {
+				fmt.Printf("[dry-run] %s: %s = %s -> %s\n", writePath, varName, oldVal, newValStr)
+			} else {
+				fmt.Printf("[kernelhub prepare] %s: %s = %s -> %s\n", filepath.Base(writePath), varName, oldVal, newValStr)
+			}
 		}
 		return indent + varName + " = " + newValStr
 	})
 
-	if !modified {
-		fmt.Printf("[kernelhub prepare] %s: no shape changes needed\n", filepath.Base(writePath))
-		return nil
+	// Step 2: Generate SHAPE_CONFIGS block
+	shapeConfigsPy := buildShapeConfigsPython(configs)
+
+	// Step 3: Replace or insert SHAPE_CONFIGS in the source
+	scRe := regexp.MustCompile(`(?ms)^SHAPE_CONFIGS\s*=\s*\[.*?\]\s*$`)
+	if scRe.MatchString(src) {
+		src = scRe.ReplaceAllString(src, shapeConfigsPy)
+	} else {
+		// Insert after the last top-level variable assignment, before get_inputs
+		getInputsRe := regexp.MustCompile(`(?m)^def get_inputs\(`)
+		loc := getInputsRe.FindStringIndex(src)
+		if loc != nil {
+			src = src[:loc[0]] + "\n" + shapeConfigsPy + "\n\n" + src[loc[0]:]
+		} else {
+			src += "\n\n" + shapeConfigsPy + "\n"
+		}
+	}
+
+	// Step 4: Ensure get_inputs() accepts shape_idx parameter and uses SHAPE_CONFIGS
+	if !strings.Contains(src, "shape_idx") {
+		src = ensureGetInputsShapeIdx(src, primaryDims)
+	}
+
+	fmt.Printf("[kernelhub prepare] %s: generated %d shape configs\n", filepath.Base(writePath), len(configs))
+	for i, sc := range configs {
+		dimParts := make([]string, 0, len(sc.Dims))
+		for k, v := range sc.Dims {
+			dimParts = append(dimParts, fmt.Sprintf("%s=%d", k, v))
+		}
+		fmt.Printf("[kernelhub prepare]   [%d] %s: %s\n", i, sc.Label, strings.Join(dimParts, ", "))
 	}
 
 	if dryRun {
 		return nil
 	}
 
-	return os.WriteFile(writePath, []byte(result), 0o644)
+	return os.WriteFile(writePath, []byte(src), 0o644)
+}
+
+// buildShapeConfigsPython generates the Python SHAPE_CONFIGS = [...] block.
+func buildShapeConfigsPython(configs []ShapeConfig) string {
+	var b strings.Builder
+	b.WriteString("SHAPE_CONFIGS = [\n")
+	for _, sc := range configs {
+		b.WriteString("    {")
+		b.WriteString(fmt.Sprintf(`"label": %q`, sc.Label))
+
+		// Sort dim keys for deterministic output
+		keys := sortedKeys(sc.Dims)
+		for _, k := range keys {
+			b.WriteString(fmt.Sprintf(`, %q: %d`, k, sc.Dims[k]))
+		}
+		b.WriteString("},\n")
+	}
+	b.WriteString("]")
+	return b.String()
+}
+
+func sortedKeys(m map[string]int64) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	for i := 1; i < len(keys); i++ {
+		for j := i; j > 0 && keys[j] < keys[j-1]; j-- {
+			keys[j], keys[j-1] = keys[j-1], keys[j]
+		}
+	}
+	return keys
+}
+
+// ensureGetInputsShapeIdx modifies the existing get_inputs() function to accept
+// a shape_idx parameter and look up dimensions from SHAPE_CONFIGS.
+func ensureGetInputsShapeIdx(src string, dims map[string]int64) string {
+	// Replace "def get_inputs():" with "def get_inputs(shape_idx=None):"
+	src = strings.Replace(src, "def get_inputs():", "def get_inputs(shape_idx=None):", 1)
+
+	// Build the shape lookup preamble
+	keys := sortedKeys(dims)
+	varList := make([]string, 0, len(keys))
+	for _, k := range keys {
+		varList = append(varList, strings.ToLower(k))
+	}
+
+	var preamble strings.Builder
+	preamble.WriteString("    if shape_idx is not None and 0 <= shape_idx < len(SHAPE_CONFIGS):\n")
+	preamble.WriteString("        cfg = SHAPE_CONFIGS[shape_idx]\n")
+	for _, k := range keys {
+		lower := strings.ToLower(k)
+		preamble.WriteString(fmt.Sprintf("        %s = cfg[%q]\n", lower, k))
+	}
+
+	// Insert after the "def get_inputs(shape_idx=None):" line
+	defLine := "def get_inputs(shape_idx=None):"
+	idx := strings.Index(src, defLine)
+	if idx < 0 {
+		return src
+	}
+	insertAt := idx + len(defLine)
+	// Find the end of the def line (the newline)
+	nlIdx := strings.Index(src[insertAt:], "\n")
+	if nlIdx < 0 {
+		return src
+	}
+	insertAt += nlIdx + 1
+
+	// Only insert if not already present
+	if !strings.Contains(src[insertAt:insertAt+200], "SHAPE_CONFIGS[shape_idx]") {
+		src = src[:insertAt] + preamble.String() + src[insertAt:]
+	}
+
+	return src
 }
 
 func installGitGuardHooks(akoRoot string) error {
