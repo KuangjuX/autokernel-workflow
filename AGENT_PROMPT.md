@@ -24,6 +24,7 @@
 
 3. Subagent 行为约束（最重要，必须写入 subagent prompt）
    - 必须先读 TASK.md 和 HINTS.md，遵守其中所有规则
+   - 如果 context/history_summary.md 存在，必须先读——它包含同一 kernel 历史优化的经验教训
    - 每次迭代必须 commit，即使失败也要 commit 后 git revert
    - ⛔ 绝对禁止：git reset、git rebase、git commit --amend
    - 唯一允许的回退方式是 git revert
@@ -41,6 +42,10 @@
    - 所有优化完成后，对每个 run 执行 sync-git → archive-git → export
    - 如果 sync-git 报完整性警告，说明 subagent 违规了，必须修复后重新 sync
    - 最终确认 dashboard HTML 中能看到所有 run 的完整迭代历史
+
+6. 跨 run 知识传递
+   - 在 prepare 阶段加 --db-path 参数，自动注入 history_summary.md 到 context/
+   - subagent 在第一轮迭代前读取该文件，跳过已知无效方向，优先尝试已验证有效的策略
 
 不要修改 third_party/ 下的任何内容。workspace 在项目目录下创建。
 ```
@@ -96,6 +101,7 @@
 
 3. Subagent 行为约束（最重要，必须写入 subagent prompt）
    - 必须先读 TASK.md 和 HINTS.md，遵守其中所有规则
+   - 如果 context/history_summary.md 存在，必须先读——它包含同一 kernel 历史优化的经验教训
    - 每次迭代必须 commit，即使失败也要 commit 后 git revert
    - ⛔ 绝对禁止：git reset、git rebase、git commit --amend
    - 唯一允许的回退方式是 git revert
@@ -113,6 +119,10 @@
    - 每轮所有优化完成后，对每个 run 执行 sync-git → archive-git → export
    - 如果 sync-git 报完整性警告，说明 subagent 违规了，必须修复后重新 sync
    - 确认 dashboard HTML 中能看到所有 run 的完整迭代历史
+
+6. 跨 run 知识传递
+   - 在 prepare 阶段加 --db-path 参数，自动注入 history_summary.md 到 context/
+   - subagent 在第一轮迭代前读取该文件，跳过已知无效方向，优先尝试已验证有效的策略
 
 不要修改 third_party/ 下的任何内容。workspace 在项目目录下创建。
 ```
@@ -333,6 +343,7 @@ E. 选择 kernel 的优先级
 
 3. Subagent 行为约束（最重要，必须写入 subagent prompt）
    - 必须先读 TASK.md 和 HINTS.md，遵守其中所有规则
+   - 如果 context/history_summary.md 存在，必须先读——它包含同一 kernel 历史优化的经验教训
    - 每次迭代必须 commit，即使失败也要 commit 后 git revert
    - ⛔ 绝对禁止：git reset、git rebase、git commit --amend
    - 唯一允许的回退方式是 git revert
@@ -351,6 +362,10 @@ E. 选择 kernel 的优先级
    - 所有优化完成后，对每个 run 执行 sync-git → archive-git → export
    - 如果 sync-git 报完整性警告，说明 subagent 违规了，必须修复后重新 sync
    - 最终确认 dashboard HTML 中能看到所有 run 的完整迭代历史
+
+6. 跨 run 知识传递
+   - 在 prepare 阶段加 --db-path 参数，自动注入 history_summary.md 到 context/
+   - subagent 在第一轮迭代前读取该文件，跳过已知无效方向，优先尝试已验证有效的策略
 
 不要修改 third_party/ 下的任何内容，也不要修改 $MMQ_KERNELS/include/ 下的原始 .cuh 文件。
 workspace 在项目目录下创建。
@@ -431,6 +446,7 @@ workspace 在项目目录下创建。
 
 3. Subagent 行为约束（最重要，必须写入 subagent prompt）
    - 必须先读 TASK.md 和 HINTS.md，遵守其中所有规则
+   - 如果 context/history_summary.md 存在，必须先读——它包含同一 kernel 历史优化的经验教训
    - 每次迭代必须 commit，即使失败也要 commit 后 git revert
    - ⛔ 绝对禁止：git reset、git rebase、git commit --amend
    - 唯一允许的回退方式是 git revert
@@ -449,6 +465,10 @@ workspace 在项目目录下创建。
    - 每轮所有优化完成后，对每个 run 执行 sync-git → archive-git → export
    - 如果 sync-git 报完整性警告，说明 subagent 违规了，必须修复后重新 sync
    - 确认 dashboard HTML 中能看到所有 run 的完整迭代历史
+
+6. 跨 run 知识传递
+   - 在 prepare 阶段加 --db-path 参数，自动注入 history_summary.md 到 context/
+   - subagent 在第一轮迭代前读取该文件，跳过已知无效方向，优先尝试已验证有效的策略
 
 不要修改 third_party/ 下的任何内容，也不要修改 $MMQ_KERNELS/include/ 下的原始 .cuh 文件。
 workspace 在项目目录下创建。
