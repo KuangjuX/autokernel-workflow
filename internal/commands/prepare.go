@@ -506,7 +506,11 @@ func ensureGetInputsShapeIdx(src string, dims map[string]int64) string {
 	insertAt += nlIdx + 1
 
 	// Only insert if not already present
-	if !strings.Contains(src[insertAt:insertAt+200], "SHAPE_CONFIGS[shape_idx]") {
+	end := insertAt + 200
+	if end > len(src) {
+		end = len(src)
+	}
+	if !strings.Contains(src[insertAt:end], "SHAPE_CONFIGS[shape_idx]") {
 		src = src[:insertAt] + preamble.String() + src[insertAt:]
 	}
 
