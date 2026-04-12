@@ -68,16 +68,20 @@ CGO_ENABLED=1 go test ./internal/commands/ -v -count=1
 - 当启发式匹配产生多个候选时，输出更清晰的警告
 - 添加 `kernelhub validate-workload` 子命令验证 workload JSON 与 kernel_assets 的一致性
 
-### 5. `get_inputs()` 注入逻辑加固
+### 5. `get_inputs()` 注入逻辑加固 ✅
 
-**状态**: 待开始
+**状态**: 已完成
 
-当前 `ensureGetInputsShapeIdx` 和 `applyMultiShapeOverrides` 使用字符串替换和正则来修改 Python 源码，对于非标准格式的 `reference.py` 可能出错。
+通过三层防护加固 `reference.py` 的注入流程：
 
-**需要做的**:
-- 建立 `reference.py` 的标准模板，新增 kernel 时从模板生成
-- 在注入前验证 `reference.py` 的结构（是否包含 `get_inputs`、是否有标准格式的维度变量）
-- 添加注入后的自动验证（`python -c "import reference; reference.get_inputs(0)"` ）
+- `templates/reference.py.tmpl` — 标准模板文件，定义结构契约（Model 类、维度变量、SHAPE_CONFIGS、get_inputs/get_init_inputs）
+- `validateReferenceStructure()` — 注入前结构校验：检查 Model 类、get_inputs 函数、维度变量声明是否存在；缺失则报错或警告
+- `verifySyntax()` — 注入后调用 `python3 compile()` 做语法检查，防止错误的 reference.py 流入 agent
+
+**相关文件**:
+- `templates/reference.py.tmpl` — 标准模板
+- `internal/commands/prepare.go` — `validateReferenceStructure()`, `verifySyntax()`, 集成到 `applyMultiShapeOverrides()`
+- `internal/commands/prepare_test.go` — 12 个新测试覆盖各种边界场景
 
 ### 6. 跨 shape 运行对比
 
@@ -105,16 +109,19 @@ CGO_ENABLED=1 go test ./internal/commands/ -v -count=1
 - 支持在 `context/` 目录中注入先前优化的经验（HINTS.md 自动更新）
 - 为 agent prompt 生成基于硬件特性的建议（L2 cache size、SM count、shared memory capacity）
 
-### 8. 跨 run 知识积累
+### 8. 跨 run 知识积累 ✅
 
-**状态**: 待开始
+**状态**: 已完成
 
-目前每次 AKO4ALL run 独立进行，不会参考之前相同 kernel 的优化经验。
+- `kernelhub generate-context` 子命令：从 history.db 提取同一 kernel 的历史优化经验
+- `kernelhub prepare --db-path` 自动注入 `context/history_summary.md`
+- 生成文档包含：成功策略表、失败策略表、关键词趋势分析、run 时间线
+- HINTS.md 和 AGENT_PROMPT.md 已更新，要求 agent 在第一轮迭代前读取
 
-**需要做的**:
-- 优化开始前，自动从 history.db 提取同一 kernel 的历史 iterations
-- 生成 `context/history_summary.md`，包含之前尝试过的优化方向和结果
-- Agent 可以避免重复失败的优化路径
+**相关文件**:
+- `internal/commands/generate_context.go` + `generate_context_test.go`
+- `internal/cli/cli.go` — generate-context 子命令注册
+- `third_party/AKO4ALL/HINTS.md` — 新增 history context 读取指引
 
 ### 9. GPU 架构参数自动检测
 

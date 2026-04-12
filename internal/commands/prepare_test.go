@@ -258,6 +258,13 @@ func TestApplyMultiShapeOverrides(t *testing.T) {
 	dstFile := filepath.Join(dir, "reference_out.py")
 
 	src := `import torch
+import torch.nn as nn
+
+class Model(nn.Module):
+    def __init__(self):
+        super().__init__()
+    def forward(self, x):
+        return x
 
 M = 4096
 N = 7168
@@ -320,7 +327,7 @@ func TestApplyMultiShapeOverrides_DryRun(t *testing.T) {
 	srcFile := filepath.Join(dir, "reference.py")
 	dstFile := filepath.Join(dir, "reference_out.py")
 
-	src := "M = 100\ndef get_inputs():\n    return []\n"
+	src := "import torch.nn as nn\n\nclass Model(nn.Module):\n    pass\n\nM = 100\n\ndef get_inputs():\n    return []\n"
 	if err := os.WriteFile(srcFile, []byte(src), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -336,6 +343,218 @@ func TestApplyMultiShapeOverrides_DryRun(t *testing.T) {
 		t.Error("dry-run should not write file")
 	}
 }
+
+// ---------------------------------------------------------------------------
+// validateReferenceStructure tests
+// ---------------------------------------------------------------------------
+
+func TestValidateReferenceStructure_Valid(t *testing.T) {
+	src := `import torch
+import torch.nn as nn
+
+class Model(nn.Module):
+    def __init__(self):
+        super().__init__()
+    def forward(self, x):
+        return x
+
+M = 8192
+N = 2048
+
+def get_inputs():
+    return [torch.randn(M, N)]
+
+def get_init_inputs():
+    return []
+`
+	v := validateReferenceStructure(src)
+	if len(v.Errors) != 0 {
+		t.Errorf("expected no errors, got: %v", v.Errors)
+	}
+	if !v.HasModelClass {
+		t.Error("should detect Model class")
+	}
+	if !v.HasGetInputs {
+		t.Error("should detect get_inputs")
+	}
+	if !v.HasGetInitInputs {
+		t.Error("should detect get_init_inputs")
+	}
+	if len(v.DimVars) != 2 {
+		t.Errorf("expected 2 dim vars, got %d: %v", len(v.DimVars), v.DimVars)
+	}
+}
+
+func TestValidateReferenceStructure_MissingModel(t *testing.T) {
+	src := `M = 100
+def get_inputs():
+    return []
+`
+	v := validateReferenceStructure(src)
+	if len(v.Errors) == 0 {
+		t.Error("should report error for missing Model class")
+	}
+	found := false
+	for _, e := range v.Errors {
+		if strings.Contains(e, "class Model") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("error should mention 'class Model'")
+	}
+}
+
+func TestValidateReferenceStructure_MissingGetInputs(t *testing.T) {
+	src := `class Model(nn.Module):
+    pass
+`
+	v := validateReferenceStructure(src)
+	if len(v.Errors) == 0 {
+		t.Error("should report error for missing get_inputs")
+	}
+}
+
+func TestValidateReferenceStructure_NoDimVars(t *testing.T) {
+	src := `class Model(nn.Module):
+    pass
+
+def get_inputs():
+    return []
+`
+	v := validateReferenceStructure(src)
+	if len(v.Warnings) == 0 {
+		t.Error("should warn about no dimension variables")
+	}
+}
+
+func TestValidateReferenceStructure_MixedCaseVarsIgnored(t *testing.T) {
+	src := `class Model(nn.Module):
+    pass
+
+batch_size = 4096
+HIDDEN_DIM = 7168
+
+def get_inputs():
+    return []
+`
+	v := validateReferenceStructure(src)
+	// Only HIDDEN_DIM should be detected (UPPER_CASE), not batch_size
+	if len(v.DimVars) != 1 || v.DimVars[0] != "HIDDEN_DIM" {
+		t.Errorf("expected [HIDDEN_DIM], got %v", v.DimVars)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// verifySyntax tests
+// ---------------------------------------------------------------------------
+
+func TestVerifySyntax_Valid(t *testing.T) {
+	src := `x = 1 + 2
+print(x)
+`
+	if err := verifySyntax(src, "test.py"); err != nil {
+		t.Errorf("valid Python should pass: %v", err)
+	}
+}
+
+func TestVerifySyntax_Invalid(t *testing.T) {
+	src := `def foo(
+    # unclosed paren
+`
+	err := verifySyntax(src, "bad.py")
+	if err == nil {
+		t.Error("invalid Python should fail syntax check")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// applyMultiShapeOverrides validation integration
+// ---------------------------------------------------------------------------
+
+func TestApplyMultiShapeOverrides_RejectsNoModel(t *testing.T) {
+	dir := t.TempDir()
+	srcFile := filepath.Join(dir, "reference.py")
+
+	src := `M = 100
+def get_inputs():
+    return []
+`
+	os.WriteFile(srcFile, []byte(src), 0o644)
+	dstFile := filepath.Join(dir, "out.py")
+
+	err := applyMultiShapeOverrides(srcFile, dstFile, map[string]int64{"M": 200},
+		[]ShapeConfig{{Label: "t", Dims: map[string]int64{"M": 200}}}, false)
+	if err == nil {
+		t.Error("should reject reference.py without Model class")
+	}
+	if !strings.Contains(err.Error(), "class Model") {
+		t.Errorf("error should mention Model class, got: %v", err)
+	}
+}
+
+func TestApplyMultiShapeOverrides_RejectsNoGetInputs(t *testing.T) {
+	dir := t.TempDir()
+	srcFile := filepath.Join(dir, "reference.py")
+
+	src := `import torch.nn as nn
+class Model(nn.Module):
+    pass
+`
+	os.WriteFile(srcFile, []byte(src), 0o644)
+	dstFile := filepath.Join(dir, "out.py")
+
+	err := applyMultiShapeOverrides(srcFile, dstFile, map[string]int64{"M": 200},
+		[]ShapeConfig{{Label: "t", Dims: map[string]int64{"M": 200}}}, false)
+	if err == nil {
+		t.Error("should reject reference.py without get_inputs")
+	}
+}
+
+func TestApplyMultiShapeOverrides_PostSyntaxCheck(t *testing.T) {
+	dir := t.TempDir()
+	srcFile := filepath.Join(dir, "reference.py")
+
+	src := `import torch
+import torch.nn as nn
+
+class Model(nn.Module):
+    def __init__(self):
+        super().__init__()
+    def forward(self, x):
+        return x
+
+M = 4096
+N = 7168
+
+def get_inputs():
+    x = torch.randn(M, N, dtype=torch.bfloat16, device="cuda")
+    return [x]
+
+def get_init_inputs():
+    return []
+`
+	os.WriteFile(srcFile, []byte(src), 0o644)
+	dstFile := filepath.Join(dir, "out.py")
+
+	dims := map[string]int64{"M": 8192, "N": 2048}
+	configs := []ShapeConfig{{Label: "test", Dims: dims}}
+
+	err := applyMultiShapeOverrides(srcFile, dstFile, dims, configs, false)
+	if err != nil {
+		t.Fatalf("valid injection should pass: %v", err)
+	}
+
+	// Verify the output file is valid Python
+	content, _ := os.ReadFile(dstFile)
+	if err := verifySyntax(string(content), "out.py"); err != nil {
+		t.Errorf("output should be valid Python: %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// loadWorkloadConfig tests
+// ---------------------------------------------------------------------------
 
 func TestLoadWorkloadConfig(t *testing.T) {
 	dir := t.TempDir()

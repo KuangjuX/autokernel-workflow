@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -390,6 +391,15 @@ func applyMultiShapeOverrides(readPath, writePath string, primaryDims map[string
 
 	src := string(content)
 
+	// Pre-injection validation
+	v := validateReferenceStructure(src)
+	for _, e := range v.Errors {
+		return fmt.Errorf("reference.py validation failed (%s): %s", filepath.Base(readPath), e)
+	}
+	for _, w := range v.Warnings {
+		fmt.Printf("[kernelhub prepare] WARNING (%s): %s\n", filepath.Base(readPath), w)
+	}
+
 	// Step 1: Override primary dimension variables (M = ..., N = ..., etc.)
 	assignRe := regexp.MustCompile(`(?m)^(\s*)([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(\d+)[ \t]*$`)
 	src = assignRe.ReplaceAllStringFunc(src, func(match string) string {
@@ -449,6 +459,11 @@ func applyMultiShapeOverrides(readPath, writePath string, primaryDims map[string
 
 	if dryRun {
 		return nil
+	}
+
+	// Post-injection syntax check
+	if err := verifySyntax(src, filepath.Base(writePath)); err != nil {
+		return fmt.Errorf("shape injection produced invalid Python: %w", err)
 	}
 
 	return os.WriteFile(writePath, []byte(src), 0o644)
@@ -531,6 +546,72 @@ func ensureGetInputsShapeIdx(src string, dims map[string]int64) string {
 	}
 
 	return src
+}
+
+// ---------------------------------------------------------------------------
+// reference.py validation
+// ---------------------------------------------------------------------------
+
+// ReferenceValidation holds the result of validating a reference.py file.
+type ReferenceValidation struct {
+	HasModelClass  bool
+	HasGetInputs   bool
+	HasGetInitInputs bool
+	DimVars        []string // module-level uppercase integer assignments found
+	Errors         []string
+	Warnings       []string
+}
+
+// validateReferenceStructure checks that a reference.py source has the
+// required structural elements before we attempt to inject SHAPE_CONFIGS.
+func validateReferenceStructure(src string) ReferenceValidation {
+	var v ReferenceValidation
+
+	// Check for class Model
+	modelClassRe := regexp.MustCompile(`(?m)^class Model\b`)
+	v.HasModelClass = modelClassRe.MatchString(src)
+	if !v.HasModelClass {
+		v.Errors = append(v.Errors, "missing 'class Model(nn.Module)' definition")
+	}
+
+	// Check for get_inputs
+	getInputsRe := regexp.MustCompile(`(?m)^def get_inputs\(`)
+	v.HasGetInputs = getInputsRe.MatchString(src)
+	if !v.HasGetInputs {
+		v.Errors = append(v.Errors, "missing 'def get_inputs(...)' function")
+	}
+
+	// Check for get_init_inputs
+	getInitRe := regexp.MustCompile(`(?m)^def get_init_inputs\(`)
+	v.HasGetInitInputs = getInitRe.MatchString(src)
+	if !v.HasGetInitInputs {
+		v.Warnings = append(v.Warnings, "missing 'def get_init_inputs()' — will default to []")
+	}
+
+	// Find module-level dimension variables (UPPER_CASE = integer)
+	dimVarRe := regexp.MustCompile(`(?m)^([A-Z][A-Z_0-9]*)\s*=\s*\d+\s*$`)
+	for _, m := range dimVarRe.FindAllStringSubmatch(src, -1) {
+		v.DimVars = append(v.DimVars, m[1])
+	}
+	if len(v.DimVars) == 0 {
+		v.Warnings = append(v.Warnings, "no module-level dimension variables (e.g. M = 8192) found")
+	}
+
+	return v
+}
+
+// verifySyntax runs Python's compile() on the source string to check for
+// syntax errors. Returns nil if the syntax is valid.
+func verifySyntax(src, filename string) error {
+	script := fmt.Sprintf(
+		`import sys; compile(sys.stdin.read(), %q, "exec")`, filename)
+	cmd := exec.Command("python3", "-c", script)
+	cmd.Stdin = strings.NewReader(src)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("syntax check failed for %s: %s", filename, strings.TrimSpace(string(out)))
+	}
+	return nil
 }
 
 func installGitGuardHooks(akoRoot string) error {
