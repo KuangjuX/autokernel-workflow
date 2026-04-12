@@ -33,6 +33,8 @@ func Run(args []string) error {
 		return runRestoreGit(args[1:])
 	case "export":
 		return runExport(args[1:])
+	case "generate-context":
+		return runGenerateContext(args[1:])
 	case "patch":
 		return runPatch(args[1:])
 	case "serve":
@@ -57,6 +59,7 @@ Commands:
   archive-git Archive git objects into history DB for offline restore
   restore-git Restore archived git objects from history DB
   export     Export self-contained static HTML dashboard for offline viewing
+  generate-context  Generate optimization history context for a kernel from prior runs
   patch      Generate framework patches from optimized kernels via kernel-adapter
   serve      Start local HTTP dashboard powered by history DB
   server     Start KernelHub API server with rate limiting
@@ -179,6 +182,28 @@ func runRestoreGit(args []string) error {
 		OutRepoPath: *outRepo,
 		Checkout:    *checkout,
 		DryRun:      *dryRun,
+	})
+}
+
+func runGenerateContext(args []string) error {
+	fs := flag.NewFlagSet("generate-context", flag.ContinueOnError)
+	dbPath := fs.String("db-path", "./workspace/history.db", "History DB path")
+	kernelName := fs.String("kernel-name", "", "Target kernel name (e.g. rms_norm)")
+	backend := fs.String("backend", "", "Filter by backend (triton/cuda), empty for all")
+	outputPath := fs.String("output", "", "Output file path (default: stdout via --dry-run)")
+	dryRun := fs.Bool("dry-run", false, "Print to stdout instead of writing file")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	return commands.GenerateContext(commands.GenerateContextOptions{
+		DBPath:     *dbPath,
+		KernelName: *kernelName,
+		Backend:    *backend,
+		OutputPath: *outputPath,
+		DryRun:     *dryRun,
 	})
 }
 
