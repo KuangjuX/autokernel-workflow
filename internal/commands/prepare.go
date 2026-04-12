@@ -21,6 +21,7 @@ type PrepareOptions struct {
 	ContextSrc     string
 	RunID          string
 	WorkloadConfig string
+	DBPath         string
 	DryRun         bool
 }
 
@@ -212,6 +213,21 @@ func Prepare(opts PrepareOptions) error {
 	if !opts.DryRun {
 		if err := installGitGuardHooks(akoRoot); err != nil {
 			fmt.Printf("[kernelhub prepare] WARNING: failed to install git guard hooks: %v\n", err)
+		}
+	}
+
+	// Auto-inject cross-run history context when --db-path is provided.
+	if opts.DBPath != "" && opts.ReferenceSrc != "" && !opts.DryRun {
+		kernelName := deriveKernelName(opts.ReferenceSrc)
+		backend := ""
+		if wlCfg != nil {
+			entry, _ := lookupShapeEntry(wlCfg.Shapes, kernelName)
+			if entry != nil {
+				backend = entry.Category
+			}
+		}
+		if err := GenerateContextForPrepare(opts.DBPath, kernelName, backend, contextDir); err != nil {
+			fmt.Printf("[kernelhub prepare] WARNING: failed to inject history context: %v\n", err)
 		}
 	}
 

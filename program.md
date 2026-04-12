@@ -66,13 +66,18 @@ git -C third_party/AKO4ALL worktree add "workspace/runs/${RUN_ID}/ako" -b "${BRA
   --reference-src "/path/to/reference.py" \
   --bench-src "/path/to/bench_or_shapes_config" \
   --context-src "/path/to/context_dir_or_file" \
-  --run-id "${RUN_ID}"
+  --run-id "${RUN_ID}" \
+  --db-path "${DB_PATH}"
 ```
 
 Notes:
 
 - `prepare` supports `--dry-run`.
 - A manifest is written to `workspace/latest_prepare_manifest.json`.
+- When `--db-path` is provided, `prepare` automatically queries history for
+  prior runs of the same kernel and generates `context/history_summary.md`.
+  The agent reads this during setup to avoid repeating failed experiments and
+  to build on successful strategies.
 
 ### Step D: Run AKO4ALL in run workspace
 

@@ -76,6 +76,7 @@ func runPrepare(args []string) error {
 	contextSrc := fs.String("context-src", "", "Optional context source")
 	runID := fs.String("run-id", "", "Optional run id")
 	workloadConfig := fs.String("workload-config", "", "Workload config JSON with kernel shapes to override in reference.py")
+	dbPath := fs.String("db-path", "", "History DB path for cross-run context injection")
 	dryRun := fs.Bool("dry-run", false, "Print actions only")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -91,6 +92,7 @@ func runPrepare(args []string) error {
 		ContextSrc:     *contextSrc,
 		RunID:          *runID,
 		WorkloadConfig: *workloadConfig,
+		DBPath:         *dbPath,
 		DryRun:         *dryRun,
 	})
 }
