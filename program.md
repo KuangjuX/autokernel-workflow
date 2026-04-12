@@ -138,6 +138,50 @@ Notes:
 - If a legacy JSON history file exists at `--db-path`, KernelHub automatically
   migrates it to SQLite and keeps a backup at `<db-path>.json.bak`.
 
+### Step I: Generate framework patches (kernel-adapter integration)
+
+```bash
+./bin/kernelhub patch \
+  --db-path "${DB_PATH}" \
+  --kernel-assets "./workspace/kernel_assets" \
+  --mmq-root "/path/to/mmq_kernels/mmq_kernels" \
+  --output-dir "./workspace/patches" \
+  --runs-dir "./workspace/runs"
+```
+
+This reads the history DB, finds the best iteration (highest speedup with
+`correctness=PASS`) for each run, and invokes `kernel-adapter batch-patch` to
+generate unified diffs applicable to the upstream framework.
+
+Output per run:
+
+```
+workspace/patches/<run-id>/
+├── patch.diff           # unified diff against framework source
+├── metadata.json        # run_id, speedup, latency, commit_hash, etc.
+└── kernel_optimized.py  # optimized kernel for reference
+```
+
+Verification and application:
+
+```bash
+# Verify only (default: --verify is on)
+./bin/kernelhub patch --db-path "${DB_PATH}" --mmq-root ... --verify
+
+# Verify and apply (creates opt/<kernel> branches in the MMQ repo)
+./bin/kernelhub patch --db-path "${DB_PATH}" --mmq-root ... --apply
+```
+
+Notes:
+
+- Requires `kernel-adapter` to be installed (`pip install -e third_party/kernel-adapter`
+  or `cd third_party/kernel-adapter && uv sync`).
+- `--verify` uses `git apply --check` to confirm patches apply cleanly.
+- `--apply` invokes `kernel-adapter patch-apply` which creates per-kernel branches.
+- `--dry-run` prints what would be done without invoking kernel-adapter.
+- When multiple runs optimize the same framework file, only the highest-speedup
+  patch is kept; lower-speedup patches are reported and skipped.
+
 ## 5) History Data Model and Parsing Contract
 
 `sync-git` appends run records; `archive-git` appends archive records to the
@@ -205,6 +249,7 @@ Stop run when one of these is true:
 - [ ] `history_snapshot.json` exported
 - [ ] `history_dashboard.html` exported
 - [ ] best commit hash recorded in run summary
+- [ ] framework patches generated via `patch` (optional, requires MMQ source)
 
 ## 9) Non-Goals for This Minimal System
 

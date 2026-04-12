@@ -24,16 +24,23 @@
 CGO_ENABLED=1 go test ./internal/commands/ -v -count=1
 ```
 
-### 2. 修复 kernel-adapter 集成
+### 2. 修复 kernel-adapter 集成 ✅
 
-**状态**: 待开始
+**状态**: 已完成
 
-当前 `third_party/kernel-adapter` submodule 不完整，`kernelhub` 中的 patch 提交流程缺少实际的集成代码。
+通过轻量级 wrapper 方式集成 kernel-adapter：
 
-**需要做的**:
-- 确认 kernel-adapter 的 API / CLI 接口
-- 在 `kernelhub` 中添加 `patch` 子命令，调用 kernel-adapter 提交优化后的 kernel
-- 端到端测试：从 AKO4ALL 产出 → 数据库 → patch 提交
+- `kernelhub patch` 子命令：调用 `kernel-adapter batch-patch` 生成 patch
+- 自动解析 history.db，查找每个 run 的最佳 iteration
+- 支持 `--verify`（git apply --check 验证）和 `--apply`（实际应用 patch）
+- `program.md` 新增 Step I 文档
+- 添加 `third_party/kernel-adapter` 符号链接修复 submodule 拼写
+
+**相关文件**:
+- `internal/commands/patch.go` — Patch() 函数实现
+- `internal/commands/patch_test.go` — 单元测试
+- `internal/cli/cli.go` — patch 子命令注册
+- `program.md` — Step I 文档
 
 ### 3. 自动化 kernel 选择
 

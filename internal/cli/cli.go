@@ -33,6 +33,8 @@ func Run(args []string) error {
 		return runRestoreGit(args[1:])
 	case "export":
 		return runExport(args[1:])
+	case "patch":
+		return runPatch(args[1:])
 	case "serve":
 		return runServe(args[1:])
 	case "server":
@@ -55,6 +57,7 @@ Commands:
   archive-git Archive git objects into history DB for offline restore
   restore-git Restore archived git objects from history DB
   export     Export self-contained static HTML dashboard for offline viewing
+  patch      Generate framework patches from optimized kernels via kernel-adapter
   serve      Start local HTTP dashboard powered by history DB
   server     Start KernelHub API server with rate limiting
 
@@ -176,6 +179,34 @@ func runRestoreGit(args []string) error {
 		OutRepoPath: *outRepo,
 		Checkout:    *checkout,
 		DryRun:      *dryRun,
+	})
+}
+
+func runPatch(args []string) error {
+	fs := flag.NewFlagSet("patch", flag.ContinueOnError)
+	dbPath := fs.String("db-path", "./workspace/history.db", "History DB path")
+	kernelAssets := fs.String("kernel-assets", "./workspace/kernel_assets", "Path to kernel_assets/ directory")
+	mmqRoot := fs.String("mmq-root", "", "Path to MMQ framework root (mmq_kernels/mmq_kernels)")
+	outputDir := fs.String("output-dir", "./workspace/patches", "Output directory for generated patches")
+	runsDir := fs.String("runs-dir", "./workspace/runs", "Path to workspace/runs/")
+	verify := fs.Bool("verify", true, "Verify patches via git apply --check")
+	apply := fs.Bool("apply", false, "Apply patches to MMQ repo (requires --verify to pass)")
+	dryRun := fs.Bool("dry-run", false, "Print actions only")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	return commands.Patch(commands.PatchOptions{
+		DBPath:       *dbPath,
+		KernelAssets: *kernelAssets,
+		MMQRoot:      *mmqRoot,
+		OutputDir:    *outputDir,
+		RunsDir:      *runsDir,
+		Verify:       *verify,
+		Apply:        *apply,
+		DryRun:       *dryRun,
 	})
 }
 
