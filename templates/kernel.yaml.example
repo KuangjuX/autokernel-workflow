@@ -1,0 +1,104 @@
+# kernel.yaml -- Kernel specification for init_kernel.py
+#
+# Place this file in workspace/kernel_assets/<name>_pkg/ alongside your
+# kernel source, then run:
+#
+#   python scripts/init_kernel.py workspace/kernel_assets/<name>_pkg
+#
+# The script generates kernel.py + reference.py from this spec.
+
+# --------------------------------------------------------------------------
+# Required fields
+# --------------------------------------------------------------------------
+
+name: rms_norm               # kernel identifier (used for file names, logs)
+backend: triton              # "triton" or "cuda"
+
+# Shape dimensions -- these become module-level variables (M = 8192, etc.)
+# and are used by `kernelhub prepare --workload-config` for shape overrides.
+dims:
+  M: 8192
+  N: 2048
+
+# Input tensors for forward() and get_inputs().
+# Each entry: {name, dtype, shape}
+#   dtype: bf16 | fp16 | fp32 | fp64 | int32 | int64 | bool | fp8
+#   shape: list of dimension names (from dims above) or integer literals
+inputs:
+  - name: hidden_states
+    dtype: bf16
+    shape: [M, N]
+  - name: gamma
+    dtype: bf16
+    shape: [N]
+
+# --------------------------------------------------------------------------
+# Optional fields
+# --------------------------------------------------------------------------
+
+# Path to your kernel source file (relative to this directory).
+# - Triton: a .py file containing @triton.jit functions
+# - CUDA:   a .cuh/.cu file with kernel + host wrapper
+# If omitted, a skeleton is generated.
+kernel_source: my_rms_norm.py
+
+# Path to your reference implementation (relative to this directory).
+# Must be a .py file with a Model class using pure PyTorch.
+# If omitted, a skeleton with NotImplementedError is generated.
+reference_source: my_ref.py
+
+# --------------------------------------------------------------------------
+# CUDA-specific options (ignored when backend=triton)
+# --------------------------------------------------------------------------
+# cuda:
+#   extra_include_paths:
+#     - /path/to/mmq_kernels/include
+#     - /path/to/ThunderKittens/include
+#   extra_cuda_cflags:
+#     - "-O3"
+#     - "-std=c++20"
+#     - "-arch=compute_90a"
+
+# --------------------------------------------------------------------------
+# Examples
+# --------------------------------------------------------------------------
+#
+# Minimal Triton (no source file, generates skeleton):
+#
+#   name: my_layernorm
+#   backend: triton
+#   dims: {M: 4096, N: 1024}
+#   inputs:
+#     - {name: x, dtype: bf16, shape: [M, N]}
+#     - {name: gamma, dtype: bf16, shape: [N]}
+#
+# CUDA C with source file:
+#
+#   name: cuda_cumsum
+#   backend: cuda
+#   dims: {ROWS: 65536, COLS: 8}
+#   inputs:
+#     - {name: x, dtype: int32, shape: [ROWS, COLS]}
+#   kernel_source: cumsum.cuh
+#   cuda:
+#     extra_cuda_cflags: ["-O3", "-std=c++17"]
+#
+# CUDA C with kittens dependency:
+#
+#   name: cuda_select_topk_grad
+#   backend: cuda
+#   dims: {ROWS: 8192, FEA_DIM: 256, K: 6}
+#   inputs:
+#     - {name: topk_values_grad, dtype: fp32, shape: [ROWS, K]}
+#     - {name: topk_indices, dtype: int64, shape: [ROWS, K]}
+#   kernel_source: select_topk_grad.cuh
+#   cuda:
+#     extra_include_paths:
+#       - /path/to/mmq_kernels/include
+#       - /path/to/ThunderKittens/include
+#       - /path/to/ThunderKittens/prototype
+#     extra_cuda_cflags:
+#       - "-O3"
+#       - "-std=c++20"
+#       - "-arch=compute_90a"
+#       - "-DKITTENS_HOPPER"
