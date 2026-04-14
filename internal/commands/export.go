@@ -329,6 +329,35 @@ func renderStaticHTML(snapshot Snapshot) string {
       background: #111821;
     }
     .inner-wrap { padding: 10px 12px 12px; }
+    .chart-container {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+    .chart-panel {
+      flex: 1;
+      border: 1px solid var(--line);
+      background: var(--panel-soft);
+      border-radius: 10px;
+      padding: 12px 14px;
+      min-width: 0;
+    }
+    .chart-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: var(--muted);
+      margin: 0 0 8px;
+    }
+    .chart-svg { display: block; width: 100%%; }
+    .chart-svg .grid-line { stroke: var(--line); stroke-width: 0.5; }
+    .chart-svg .baseline { stroke: var(--warn); stroke-width: 1; stroke-dasharray: 5 3; }
+    .chart-svg .data-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+    .chart-svg .data-dot { cursor: pointer; }
+    .chart-svg .axis-label { fill: var(--muted); font-size: 10px; font-family: ui-monospace, monospace; }
+    .chart-svg .tooltip-bg { fill: var(--panel); stroke: var(--line); rx: 4; }
+    .chart-svg .tooltip-text { fill: var(--text); font-size: 11px; font-family: ui-monospace, monospace; }
+    @media (max-width: 900px) { .chart-container { flex-direction: column; } }
     .muted { color: var(--muted); }
     .hidden { display: none; }
     .badge {
@@ -590,6 +619,96 @@ func renderStaticHTML(snapshot Snapshot) string {
       return "";
     }
 
+    function renderIterCharts(iterations) {
+      const pts = [];
+      iterations.forEach((it, i) => {
+        const lat = parseFloat(it.latency_us);
+        const spd = parseFloat(it.speedup_vs_baseline);
+        if (!isNaN(lat) && !isNaN(spd)) {
+          pts.push({ idx: i, iter: safeText(it.iteration, String(i)), lat: lat, spd: spd, hash: shortHash(it.commit_hash || "") });
+        }
+      });
+      if (pts.length < 2) return null;
+
+      const baseLat = pts[0].lat;
+      const baseSpd = pts[0].spd;
+      pts.forEach(p => { p.relSpd = baseSpd > 0 ? p.spd / baseSpd : 1; });
+
+      function buildSVG(data, yKey, yLabel, color, baselineVal, baselineLabel, fmtY) {
+        const W = 460, H = 200, padL = 52, padR = 16, padT = 18, padB = 28;
+        const plotW = W - padL - padR, plotH = H - padT - padB;
+
+        const xs = data.map(d => d.idx);
+        const ys = data.map(d => d[yKey]);
+        const allY = baselineVal !== null ? ys.concat(baselineVal) : ys;
+        let yMin = Math.min.apply(null, allY);
+        let yMax = Math.max.apply(null, allY);
+        const yPad = (yMax - yMin) * 0.12 || 1;
+        yMin -= yPad; yMax += yPad;
+
+        const xMin = Math.min.apply(null, xs);
+        const xMax = Math.max.apply(null, xs);
+        const xRange = xMax - xMin || 1;
+
+        function sx(v) { return padL + (v - xMin) / xRange * plotW; }
+        function sy(v) { return padT + (1 - (v - yMin) / (yMax - yMin)) * plotH; }
+
+        let svg = '<svg class="chart-svg" viewBox="0 0 ' + W + ' ' + H + '" xmlns="http://www.w3.org/2000/svg">';
+
+        const nTicks = 4;
+        for (let i = 0; i <= nTicks; i++) {
+          const yv = yMin + (yMax - yMin) * i / nTicks;
+          const y = sy(yv);
+          svg += '<line class="grid-line" x1="' + padL + '" x2="' + (W - padR) + '" y1="' + y + '" y2="' + y + '"/>';
+          svg += '<text class="axis-label" x="' + (padL - 4) + '" y="' + (y + 3) + '" text-anchor="end">' + fmtY(yv) + '</text>';
+        }
+
+        if (baselineVal !== null) {
+          const by = sy(baselineVal);
+          svg += '<line class="baseline" x1="' + padL + '" x2="' + (W - padR) + '" y1="' + by + '" y2="' + by + '"/>';
+          svg += '<text class="axis-label" x="' + (W - padR + 2) + '" y="' + (by - 4) + '" fill="var(--warn)" font-size="9">' + escapeHtml(baselineLabel) + '</text>';
+        }
+
+        let pathD = '';
+        data.forEach((d, i) => {
+          const x = sx(d.idx), y = sy(d[yKey]);
+          pathD += (i === 0 ? 'M' : 'L') + x.toFixed(1) + ',' + y.toFixed(1);
+        });
+        svg += '<path class="data-line" d="' + pathD + '" stroke="' + color + '"/>';
+
+        data.forEach(d => {
+          const x = sx(d.idx), y = sy(d[yKey]);
+          svg += '<circle class="data-dot" cx="' + x.toFixed(1) + '" cy="' + y.toFixed(1) + '" r="4" fill="' + color + '" stroke="var(--panel)" stroke-width="1.5">';
+          svg += '<title>iter ' + escapeHtml(d.iter) + ' (' + escapeHtml(d.hash) + ')\n' + yLabel + ': ' + fmtY(d[yKey]) + '</title></circle>';
+        });
+
+        data.forEach(d => {
+          const x = sx(d.idx);
+          svg += '<text class="axis-label" x="' + x.toFixed(1) + '" y="' + (H - 4) + '" text-anchor="middle">' + escapeHtml(d.iter) + '</text>';
+        });
+
+        svg += '</svg>';
+        return svg;
+      }
+
+      const container = document.createElement("div");
+      container.className = "chart-container";
+
+      const panel1 = document.createElement("div");
+      panel1.className = "chart-panel";
+      panel1.innerHTML = '<p class="chart-title">Latency (us) per Iteration</p>' +
+        buildSVG(pts, "lat", "latency", "#58a6ff", baseLat, "iter 0 baseline", function(v) { return v.toFixed(0); });
+      container.appendChild(panel1);
+
+      const panel2 = document.createElement("div");
+      panel2.className = "chart-panel";
+      panel2.innerHTML = '<p class="chart-title">Relative Speedup (vs iter 0)</p>' +
+        buildSVG(pts, "relSpd", "rel. speedup", "#9af0a6", 1.0, "1.0x (no change)", function(v) { return v.toFixed(2) + "x"; });
+      container.appendChild(panel2);
+
+      return container;
+    }
+
     function renderRunDetails(run) {
       const wrap = document.createElement("div");
       wrap.className = "inner-wrap";
@@ -619,6 +738,10 @@ func renderStaticHTML(snapshot Snapshot) string {
         });
       }
       table.appendChild(body);
+
+      const chart = renderIterCharts(iterations);
+      if (chart) wrap.appendChild(chart);
+
       wrap.appendChild(table);
       return wrap;
     }
