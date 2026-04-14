@@ -19,6 +19,8 @@ type SyncGitOptions struct {
 	RunID    string
 	DryRun   bool
 	Force    bool
+	Upsert   bool
+	Replace  bool
 }
 
 type HistoryFile struct {
@@ -115,16 +117,30 @@ func SyncGit(opts SyncGitOptions) error {
 		Iterations:  records,
 	}
 
+	if opts.Upsert && opts.Replace {
+		return errors.New("--upsert and --replace are mutually exclusive")
+	}
+
+	mode := WriteModeInsert
+	modeLabel := "synced"
+	if opts.Upsert {
+		mode = WriteModeUpsert
+		modeLabel = "upserted"
+	} else if opts.Replace {
+		mode = WriteModeReplace
+		modeLabel = "replaced"
+	}
+
 	if opts.DryRun {
-		fmt.Printf("[kernelhub sync-git] dry-run run_id=%s commits=%d\n", runID, len(records))
+		fmt.Printf("[kernelhub sync-git] dry-run run_id=%s commits=%d mode=%s\n", runID, len(records), modeLabel)
 		return nil
 	}
 
-	if err := appendRun(opts.DBPath, run); err != nil {
+	if err := appendRunWithMode(opts.DBPath, run, mode); err != nil {
 		return err
 	}
 
-	fmt.Printf("[kernelhub sync-git] synced run_id=%s commits=%d -> %s\n", runID, len(records), opts.DBPath)
+	fmt.Printf("[kernelhub sync-git] %s run_id=%s commits=%d -> %s\n", modeLabel, runID, len(records), opts.DBPath)
 	return nil
 }
 

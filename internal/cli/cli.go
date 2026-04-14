@@ -105,6 +105,8 @@ func runSyncGit(args []string) error {
 	runID := fs.String("run-id", "", "Optional run id override")
 	dryRun := fs.Bool("dry-run", false, "Print actions only")
 	force := fs.Bool("force", false, "Bypass history integrity check")
+	upsert := fs.Bool("upsert", false, "Merge new iterations into existing run instead of failing on duplicate run_id")
+	replace := fs.Bool("replace", false, "Delete existing run and re-create from scratch on duplicate run_id")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
 			return nil
@@ -118,6 +120,8 @@ func runSyncGit(args []string) error {
 		RunID:    *runID,
 		DryRun:   *dryRun,
 		Force:    *force,
+		Upsert:   *upsert,
+		Replace:  *replace,
 	})
 }
 

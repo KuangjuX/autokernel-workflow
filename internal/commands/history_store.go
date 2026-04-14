@@ -17,7 +17,19 @@ import (
 
 const sqliteMagicHeader = "SQLite format 3\x00"
 
+type WriteMode int
+
+const (
+	WriteModeInsert  WriteMode = iota // fail if run_id exists
+	WriteModeUpsert                   // merge new iterations into existing run
+	WriteModeReplace                  // delete old run, insert fresh
+)
+
 func appendRun(path string, run RunRecord) error {
+	return appendRunWithMode(path, run, WriteModeInsert)
+}
+
+func appendRunWithMode(path string, run RunRecord, mode WriteMode) error {
 	db, err := openHistoryDB(path)
 	if err != nil {
 		return err
@@ -30,7 +42,7 @@ func appendRun(path string, run RunRecord) error {
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	if err := insertRunTx(tx, run); err != nil {
+	if err := insertRunTx(tx, run, mode); err != nil {
 		return err
 	}
 	if err := setMetaTx(tx, "generated_at", time.Now().UTC().Format(time.RFC3339)); err != nil {
@@ -151,6 +163,7 @@ func initHistorySchema(db *sql.DB) error {
 			synced_at TEXT NOT NULL,
 			commit_count INTEGER NOT NULL
 		)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_run_id ON runs(run_id)`,
 		`CREATE TABLE IF NOT EXISTS iterations (
 			id INTEGER PRIMARY KEY AUTOINCREMENT,
 			run_row_id INTEGER NOT NULL,
@@ -224,7 +237,86 @@ func ensureHistorySchemaCompat(db *sql.DB) error {
 			return err
 		}
 	}
+
+	if err := deduplicateRunsMigration(db); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// deduplicateRunsMigration collapses duplicate run_id rows that existed
+// before the UNIQUE index was introduced. For each group of duplicates,
+// the row with the most iterations is kept; the rest are deleted via
+// CASCADE. The unique index is then created if it doesn't already exist.
+func deduplicateRunsMigration(db *sql.DB) error {
+	hasIndex, err := indexExists(db, "idx_runs_run_id")
+	if err != nil {
+		return err
+	}
+	if hasIndex {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+
+	rows, err := tx.Query(
+		`SELECT run_id FROM runs GROUP BY run_id HAVING COUNT(*) > 1`,
+	)
+	if err != nil {
+		return err
+	}
+	var dups []string
+	for rows.Next() {
+		var rid string
+		if err := rows.Scan(&rid); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		dups = append(dups, rid)
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+
+	for _, rid := range dups {
+		if _, err := tx.Exec(
+			`DELETE FROM runs WHERE run_id = ? AND id != (
+				SELECT r.id FROM runs r
+				LEFT JOIN iterations i ON i.run_row_id = r.id
+				WHERE r.run_id = ?
+				GROUP BY r.id
+				ORDER BY COUNT(i.id) DESC, r.id DESC
+				LIMIT 1
+			)`, rid, rid,
+		); err != nil {
+			return err
+		}
+	}
+
+	if _, err := tx.Exec(
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_runs_run_id ON runs(run_id)`,
+	); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
+func indexExists(db *sql.DB, indexName string) (bool, error) {
+	var count int
+	err := db.QueryRow(
+		`SELECT COUNT(*) FROM sqlite_master WHERE type='index' AND name=?`,
+		indexName,
+	).Scan(&count)
+	if err != nil {
+		return false, err
+	}
+	return count > 0, nil
 }
 
 func tableHasColumn(db *sql.DB, tableName, columnName string) (bool, error) {
@@ -356,7 +448,7 @@ func migrateLegacyJSONToSQLite(path string, legacy HistoryFile) error {
 	}
 
 	for _, run := range legacy.Runs {
-		if err := insertRunTx(tx, run); err != nil {
+		if err := insertRunTx(tx, run, WriteModeInsert); err != nil {
 			return rollbackWithErr(err)
 		}
 	}
@@ -409,65 +501,113 @@ func chooseBackupPath(base string) (string, error) {
 	return "", fmt.Errorf("cannot allocate backup path for %s", base)
 }
 
-func insertRunTx(tx *sql.Tx, run RunRecord) error {
+func insertRunTx(tx *sql.Tx, run RunRecord, mode WriteMode) error {
+	var existingRowID int64
+	err := tx.QueryRow(
+		`SELECT id FROM runs WHERE run_id = ? LIMIT 1`, run.RunID,
+	).Scan(&existingRowID)
+	exists := err == nil
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return err
+	}
+
+	switch {
+	case exists && mode == WriteModeInsert:
+		return fmt.Errorf("run_id already exists: %s (use --upsert to merge or --replace to overwrite)", run.RunID)
+
+	case exists && mode == WriteModeReplace:
+		if _, err := tx.Exec(`DELETE FROM runs WHERE id = ?`, existingRowID); err != nil {
+			return err
+		}
+		return insertRunFreshTx(tx, run)
+
+	case exists && mode == WriteModeUpsert:
+		if _, err := tx.Exec(
+			`UPDATE runs SET branch = ?, repo_path = ?, synced_at = ?, commit_count = ?
+			 WHERE id = ?`,
+			run.Branch, run.RepoPath, run.SyncedAt, run.CommitCount, existingRowID,
+		); err != nil {
+			return err
+		}
+		knownHashes, err := existingCommitHashesTx(tx, existingRowID)
+		if err != nil {
+			return err
+		}
+		for _, it := range run.Iterations {
+			if knownHashes[it.CommitHash] {
+				continue
+			}
+			if err := insertSingleIterationTx(tx, existingRowID, it); err != nil {
+				return err
+			}
+		}
+		return nil
+
+	default:
+		return insertRunFreshTx(tx, run)
+	}
+}
+
+func insertRunFreshTx(tx *sql.Tx, run RunRecord) error {
 	res, err := tx.Exec(
 		`INSERT INTO runs (run_id, branch, repo_path, synced_at, commit_count)
 		 VALUES (?, ?, ?, ?, ?)`,
-		run.RunID,
-		run.Branch,
-		run.RepoPath,
-		run.SyncedAt,
-		run.CommitCount,
+		run.RunID, run.Branch, run.RepoPath, run.SyncedAt, run.CommitCount,
 	)
 	if err != nil {
 		return err
 	}
-
 	runRowID, err := res.LastInsertId()
 	if err != nil {
 		return err
 	}
-
 	for _, it := range run.Iterations {
-		var speedup any
-		if it.HasSpeedup || it.SpeedupVsBaseline != 0 {
-			speedup = it.SpeedupVsBaseline
-		}
-
-		var latency any
-		if it.HasLatency || it.LatencyUs != 0 {
-			latency = it.LatencyUs
-		}
-
-		if _, err := tx.Exec(
-			`INSERT INTO iterations (
-				run_row_id, iteration, commit_hash, parent_commit_hash, commit_time,
-				subject, hypothesis, changes, analysis, kernel, agent, gpu, backend,
-				correctness, speedup_vs_baseline, latency_us, patch, patch_error
-			) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-			runRowID,
-			it.Iteration,
-			it.CommitHash,
-			it.ParentCommitHash,
-			it.CommitTime,
-			it.Subject,
-			it.Hypothesis,
-			it.Changes,
-			it.Analysis,
-			it.Kernel,
-			it.Agent,
-			it.GPU,
-			it.Backend,
-			it.Correctness,
-			speedup,
-			latency,
-			it.Patch,
-			it.PatchError,
-		); err != nil {
+		if err := insertSingleIterationTx(tx, runRowID, it); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+func insertSingleIterationTx(tx *sql.Tx, runRowID int64, it IterationRecord) error {
+	var speedup any
+	if it.HasSpeedup || it.SpeedupVsBaseline != 0 {
+		speedup = it.SpeedupVsBaseline
+	}
+	var latency any
+	if it.HasLatency || it.LatencyUs != 0 {
+		latency = it.LatencyUs
+	}
+	_, err := tx.Exec(
+		`INSERT INTO iterations (
+			run_row_id, iteration, commit_hash, parent_commit_hash, commit_time,
+			subject, hypothesis, changes, analysis, kernel, agent, gpu, backend,
+			correctness, speedup_vs_baseline, latency_us, patch, patch_error
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		runRowID, it.Iteration, it.CommitHash, it.ParentCommitHash, it.CommitTime,
+		it.Subject, it.Hypothesis, it.Changes, it.Analysis, it.Kernel, it.Agent,
+		it.GPU, it.Backend, it.Correctness, speedup, latency, it.Patch, it.PatchError,
+	)
+	return err
+}
+
+func existingCommitHashesTx(tx *sql.Tx, runRowID int64) (map[string]bool, error) {
+	rows, err := tx.Query(
+		`SELECT commit_hash FROM iterations WHERE run_row_id = ?`, runRowID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make(map[string]bool)
+	for rows.Next() {
+		var h string
+		if err := rows.Scan(&h); err != nil {
+			return nil, err
+		}
+		out[h] = true
+	}
+	return out, rows.Err()
 }
 
 func insertArchiveTx(tx *sql.Tx, record GitArchiveRecord) error {
@@ -547,13 +687,38 @@ func queryRuns(db *sql.DB) ([]RunRecord, error) {
 		return nil, err
 	}
 
-	out := make([]RunRecord, 0, len(pending))
+	// Deduplicate at query time: if multiple rows share the same run_id
+	// (legacy data before the UNIQUE constraint), keep the one with the
+	// latest synced_at and merge iterations from all rows.
+	seen := make(map[string]int) // run_id -> index in out
+	var out []RunRecord
 	for _, item := range pending {
 		iterations, err := queryIterationsForRun(db, item.rowID)
 		if err != nil {
 			return nil, err
 		}
 		item.run.Iterations = iterations
+
+		if idx, dup := seen[item.run.RunID]; dup {
+			existing := &out[idx]
+			if item.run.SyncedAt > existing.SyncedAt {
+				existing.SyncedAt = item.run.SyncedAt
+				existing.Branch = item.run.Branch
+				existing.RepoPath = item.run.RepoPath
+			}
+			hashSet := make(map[string]bool, len(existing.Iterations))
+			for _, it := range existing.Iterations {
+				hashSet[it.CommitHash] = true
+			}
+			for _, it := range item.run.Iterations {
+				if !hashSet[it.CommitHash] {
+					existing.Iterations = append(existing.Iterations, it)
+				}
+			}
+			existing.CommitCount = len(existing.Iterations)
+			continue
+		}
+		seen[item.run.RunID] = len(out)
 		out = append(out, item.run)
 	}
 	return out, nil

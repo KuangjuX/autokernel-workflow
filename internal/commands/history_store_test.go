@@ -193,6 +193,147 @@ func TestDBOpenCreatesParentDir(t *testing.T) {
 	}
 }
 
+func TestInsertDuplicateRunID_Rejected(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	run := RunRecord{
+		RunID: "run-dup", Branch: "b", RepoPath: "/tmp",
+		SyncedAt: "2025-01-01T00:00:00Z", CommitCount: 1,
+		Iterations: []IterationRecord{
+			{Iteration: 0, CommitHash: "aaa", CommitTime: "2025-01-01T00:00:00Z", Subject: "s", Hypothesis: "h"},
+		},
+	}
+	if err := appendRun(dbPath, run); err != nil {
+		t.Fatal(err)
+	}
+	err := appendRun(dbPath, run)
+	if err == nil {
+		t.Fatal("expected error on duplicate run_id insert")
+	}
+}
+
+func TestUpsert_MergesNewIterations(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	run1 := RunRecord{
+		RunID: "run-ups", Branch: "b", RepoPath: "/tmp",
+		SyncedAt: "2025-01-01T00:00:00Z", CommitCount: 2,
+		Iterations: []IterationRecord{
+			{Iteration: 0, CommitHash: "aaa", CommitTime: "2025-01-01T00:00:00Z", Subject: "s0", Hypothesis: "h0"},
+			{Iteration: 1, CommitHash: "bbb", CommitTime: "2025-01-01T00:01:00Z", Subject: "s1", Hypothesis: "h1"},
+		},
+	}
+	if err := appendRunWithMode(dbPath, run1, WriteModeInsert); err != nil {
+		t.Fatal(err)
+	}
+
+	run2 := RunRecord{
+		RunID: "run-ups", Branch: "b-updated", RepoPath: "/tmp/new",
+		SyncedAt: "2025-01-02T00:00:00Z", CommitCount: 3,
+		Iterations: []IterationRecord{
+			{Iteration: 0, CommitHash: "aaa", CommitTime: "2025-01-01T00:00:00Z", Subject: "s0", Hypothesis: "h0"},
+			{Iteration: 1, CommitHash: "bbb", CommitTime: "2025-01-01T00:01:00Z", Subject: "s1", Hypothesis: "h1"},
+			{Iteration: 2, CommitHash: "ccc", CommitTime: "2025-01-01T00:02:00Z", Subject: "s2", Hypothesis: "h2"},
+		},
+	}
+	if err := appendRunWithMode(dbPath, run2, WriteModeUpsert); err != nil {
+		t.Fatal(err)
+	}
+
+	history, err := loadHistory(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history.Runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(history.Runs))
+	}
+	got := history.Runs[0]
+	if got.Branch != "b-updated" {
+		t.Errorf("branch = %q, want %q", got.Branch, "b-updated")
+	}
+	if len(got.Iterations) != 3 {
+		t.Errorf("expected 3 iterations, got %d", len(got.Iterations))
+	}
+	if got.Iterations[2].CommitHash != "ccc" {
+		t.Errorf("iter 2 hash = %q, want %q", got.Iterations[2].CommitHash, "ccc")
+	}
+}
+
+func TestReplace_DeletesAndRecreates(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	run1 := RunRecord{
+		RunID: "run-rep", Branch: "b", RepoPath: "/tmp",
+		SyncedAt: "2025-01-01T00:00:00Z", CommitCount: 2,
+		Iterations: []IterationRecord{
+			{Iteration: 0, CommitHash: "aaa", CommitTime: "2025-01-01T00:00:00Z", Subject: "s0", Hypothesis: "h0"},
+			{Iteration: 1, CommitHash: "bbb", CommitTime: "2025-01-01T00:01:00Z", Subject: "s1", Hypothesis: "h1"},
+		},
+	}
+	if err := appendRunWithMode(dbPath, run1, WriteModeInsert); err != nil {
+		t.Fatal(err)
+	}
+
+	run2 := RunRecord{
+		RunID: "run-rep", Branch: "b-new", RepoPath: "/tmp",
+		SyncedAt: "2025-01-02T00:00:00Z", CommitCount: 1,
+		Iterations: []IterationRecord{
+			{Iteration: 0, CommitHash: "zzz", CommitTime: "2025-01-02T00:00:00Z", Subject: "new-s0", Hypothesis: "new-h0"},
+		},
+	}
+	if err := appendRunWithMode(dbPath, run2, WriteModeReplace); err != nil {
+		t.Fatal(err)
+	}
+
+	history, err := loadHistory(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history.Runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(history.Runs))
+	}
+	got := history.Runs[0]
+	if got.Branch != "b-new" {
+		t.Errorf("branch = %q, want %q", got.Branch, "b-new")
+	}
+	if len(got.Iterations) != 1 {
+		t.Fatalf("expected 1 iteration after replace, got %d", len(got.Iterations))
+	}
+	if got.Iterations[0].CommitHash != "zzz" {
+		t.Errorf("iter 0 hash = %q, want %q", got.Iterations[0].CommitHash, "zzz")
+	}
+}
+
+func TestUpsert_OnNewRunID_CreatesNormally(t *testing.T) {
+	dir := t.TempDir()
+	dbPath := filepath.Join(dir, "test.db")
+
+	run := RunRecord{
+		RunID: "run-new", Branch: "b", RepoPath: "/tmp",
+		SyncedAt: "2025-01-01T00:00:00Z", CommitCount: 1,
+		Iterations: []IterationRecord{
+			{Iteration: 0, CommitHash: "aaa", CommitTime: "2025-01-01T00:00:00Z", Subject: "s", Hypothesis: "h"},
+		},
+	}
+	if err := appendRunWithMode(dbPath, run, WriteModeUpsert); err != nil {
+		t.Fatal(err)
+	}
+
+	history, err := loadHistory(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(history.Runs) != 1 {
+		t.Fatalf("expected 1 run, got %d", len(history.Runs))
+	}
+	if history.Runs[0].RunID != "run-new" {
+		t.Errorf("RunID = %q", history.Runs[0].RunID)
+	}
+}
+
 func TestGetSetMeta(t *testing.T) {
 	dir := t.TempDir()
 	dbPath := filepath.Join(dir, "test.db")
