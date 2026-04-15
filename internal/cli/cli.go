@@ -37,6 +37,8 @@ func Run(args []string) error {
 		return runGenerateContext(args[1:])
 	case "patch":
 		return runPatch(args[1:])
+	case "recalibrate":
+		return runRecalibrate(args[1:])
 	case "serve":
 		return runServe(args[1:])
 	case "server":
@@ -61,6 +63,7 @@ Commands:
   export     Export self-contained static HTML dashboard for offline viewing
   generate-context  Generate optimization history context for a kernel from prior runs
   patch      Generate framework patches from optimized kernels via kernel-adapter
+  recalibrate Re-bench existing runs with --baseline to get true baseline speedup
   serve      Start local HTTP dashboard powered by history DB
   server     Start KernelHub API server with rate limiting
 
@@ -238,6 +241,28 @@ func runPatch(args []string) error {
 		Verify:       *verify,
 		Apply:        *apply,
 		DryRun:       *dryRun,
+	})
+}
+
+func runRecalibrate(args []string) error {
+	fs := flag.NewFlagSet("recalibrate", flag.ContinueOnError)
+	dbPath := fs.String("db-path", "./workspace/history.db", "History DB path")
+	runsDir := fs.String("runs-dir", "./workspace/runs", "Path to workspace/runs/")
+	runID := fs.String("run-id", "", "Recalibrate a single run (default: all runs)")
+	dryRun := fs.Bool("dry-run", false, "Print results without updating the database")
+	verbose := fs.Bool("verbose", false, "Print bench command and output details")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	return commands.Recalibrate(commands.RecalibrateOptions{
+		DBPath:  *dbPath,
+		RunsDir: *runsDir,
+		RunID:   *runID,
+		DryRun:  *dryRun,
+		Verbose: *verbose,
 	})
 }
 

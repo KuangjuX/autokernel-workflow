@@ -30,6 +30,8 @@
    - 唯一允许的回退方式是 git revert
    - 告知 subagent：kernelhub sync-git 会做 reflog 扫描，违规会导致整个 run 被拒绝
    - 每个 commit body 必须包含结构化字段（kernel/agent/gpu/backend/correctness/speedup_vs_baseline/latency_us/changes/analysis）
+   - ⚠️ bench.sh 生成时必须包含 `--baseline input/kernel.py` 参数
+   - ⚠️ commit body 中的 `speedup_vs_baseline` 必须填 bench 输出的 `BASELINE_SPEEDUP`（不是 `SPEEDUP`）
 
 4. 优化策略指引（写入 subagent prompt 供参考）
    - Tier 1：修正 num_sms 为实际值、去掉 int64 offset、调 block_size/num_warps/num_stages
@@ -107,6 +109,8 @@
    - 唯一允许的回退方式是 git revert
    - 告知 subagent：kernelhub sync-git 会做 reflog 扫描，违规会导致整个 run 被拒绝
    - 每个 commit body 必须包含结构化字段（kernel/agent/gpu/backend/correctness/speedup_vs_baseline/latency_us/changes/analysis）
+   - ⚠️ bench.sh 生成时必须包含 `--baseline input/kernel.py` 参数
+   - ⚠️ commit body 中的 `speedup_vs_baseline` 必须填 bench 输出的 `BASELINE_SPEEDUP`（不是 `SPEEDUP`）
 
 4. 优化策略指引（写入 subagent prompt 供参考）
    - Tier 1：修正 num_sms 为实际值、去掉 int64 offset、调 block_size/num_warps/num_stages
@@ -349,6 +353,8 @@ E. 选择 kernel 的优先级
    - 唯一允许的回退方式是 git revert
    - 告知 subagent：kernelhub sync-git 会做 reflog 扫描，违规会导致整个 run 被拒绝
    - 每个 commit body 必须包含结构化字段（kernel/agent/gpu/backend/correctness/speedup_vs_baseline/latency_us/changes/analysis）
+   - ⚠️ bench.sh 生成时必须包含 `--baseline input/kernel.py` 参数
+   - ⚠️ commit body 中的 `speedup_vs_baseline` 必须填 bench 输出的 `BASELINE_SPEEDUP`（不是 `SPEEDUP`）
 
 4. CUDA C 优化策略指引（写入 subagent prompt 供参考）
    - Tier 1：线程块大小（blockDim）、grid 维度、shared memory 大小
@@ -452,6 +458,8 @@ workspace 在项目目录下创建。
    - 唯一允许的回退方式是 git revert
    - 告知 subagent：kernelhub sync-git 会做 reflog 扫描，违规会导致整个 run 被拒绝
    - 每个 commit body 必须包含结构化字段（kernel/agent/gpu/backend/correctness/speedup_vs_baseline/latency_us/changes/analysis）
+   - ⚠️ bench.sh 生成时必须包含 `--baseline input/kernel.py` 参数
+   - ⚠️ commit body 中的 `speedup_vs_baseline` 必须填 bench 输出的 `BASELINE_SPEEDUP`（不是 `SPEEDUP`）
 
 4. CUDA C 优化策略指引（写入 subagent prompt 供参考）
    - Tier 1：线程块大小（blockDim）、grid 维度、shared memory 大小
