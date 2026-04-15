@@ -1,0 +1,12 @@
+.git
+.gitmodules
+workspace/
+bin/
+workloads/
+third_party/
+docs/
+scripts/
+*.md
+*.test
+__pycache__/
+.cursor/
