@@ -28,6 +28,7 @@ RUN apt-get update && \
 WORKDIR /app
 
 COPY --from=builder /app/kernelhub .
+COPY history.db /data/history.db
 
 EXPOSE 8080
 
