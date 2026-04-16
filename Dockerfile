@@ -22,18 +22,16 @@ FROM debian:bookworm-slim
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-        ca-certificates curl tzdata && \
+        ca-certificates curl net-tools vim tzdata && \
     rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
 COPY --from=builder /app/kernelhub .
 
-RUN mkdir -p /data
-
 EXPOSE 8080
 
 VOLUME ["/data"]
 
 ENTRYPOINT ["./kernelhub"]
-CMD ["server", "--listen", "0.0.0.0:8080", "--db-path", "/data/history.db"]
+CMD ["serve", "--listen", "0.0.0.0:8080", "--db-path", "/data/history.db"]

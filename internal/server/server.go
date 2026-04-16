@@ -84,6 +84,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 
 func (s *Server) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/healthz", s.handleHealthz)
+	mux.HandleFunc("/dashboard", s.handleDashboard)
 	mux.HandleFunc("/", s.handleRoot)
 
 	mux.HandleFunc(apiV1Prefix+"/snapshot", s.handleSnapshot)
@@ -106,8 +107,17 @@ func (s *Server) handleRoot(w http.ResponseWriter, r *http.Request) {
 		"service":    "kernelhub",
 		"version":    "0.1.0",
 		"api_prefix": apiV1Prefix,
+		"dashboard":  "/dashboard",
 		"started_at": s.startedAt.UTC().Format(time.RFC3339),
 	})
+}
+
+func (s *Server) handleDashboard(w http.ResponseWriter, r *http.Request) {
+	html := commands.RenderDashboardHTML()
+	html = strings.ReplaceAll(html, `"/api/snapshot`, `"/api/v1/snapshot`)
+	html = strings.ReplaceAll(html, `"/api/patch?`, `"/api/v1/patch?`)
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_, _ = w.Write([]byte(html))
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, _ *http.Request) {

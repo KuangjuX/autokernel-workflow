@@ -103,6 +103,11 @@ func writeJSON(w http.ResponseWriter, status int, value any) {
 	_, _ = w.Write(payload)
 }
 
+// RenderDashboardHTML returns the self-contained dashboard HTML page.
+func RenderDashboardHTML() string {
+	return renderServeHTML()
+}
+
 func renderServeHTML() string {
 	return `<!doctype html>
 <html lang="en">
