@@ -1,9 +1,8 @@
 # ---- Build stage ----
-FROM golang:1.22 AS builder
+FROM golang:1.22-bookworm AS builder
 
 WORKDIR /app
 
-# Configure Go proxy for internal dependencies (override at build time if needed)
 ARG GOPROXY="https://goproxy.cn,direct"
 ENV GOPROXY=${GOPROXY}
 
@@ -12,14 +11,14 @@ RUN go mod download
 
 COPY . .
 
-# go-sqlite3 requires CGO; statically link libc via musl for a portable binary
-RUN apt-get update && apt-get install -y --no-install-recommends musl-tools && rm -rf /var/lib/apt/lists/*
-RUN CC=musl-gcc CGO_ENABLED=1 go build \
-    -ldflags '-linkmode external -extldflags "-static"' \
-    -o kernelhub ./cmd/kernelhub
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc libc6-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN CGO_ENABLED=1 go build -o kernelhub ./cmd/kernelhub
 
 # ---- Runtime stage ----
-FROM ubuntu:22.04
+FROM debian:bookworm-slim
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \

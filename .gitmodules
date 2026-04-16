@@ -1,9 +1,12 @@
 [submodule "third_party/AKO4ALL"]
 	path = third_party/AKO4ALL
 	url = https://github.com/KuangjuX/AKO4ALL.git
+	update = none
 [submodule "third_party/ptx-isa-markdown"]
 	path = third_party/ptx-isa-markdown
 	url = git@github.com:KuangjuX/ptx-isa-markdown.git
+	update = none
 [submodule "third_party/kernel-adapater"]
 	path = third_party/kernel-adapater
 	url = git@github.com:KuangjuX/kernel-adapater.git
+	update = none
