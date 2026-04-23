@@ -6,3 +6,6 @@
 	path = third_party/ptx-isa-markdown
 	url = git@github.com:KuangjuX/ptx-isa-markdown.git
 	update = none
+[submodule "third_party/kernel-adapter"]
+	path = third_party/kernel-adapter
+	url = git@github.com:KuangjuX/kernel-adapter.git
